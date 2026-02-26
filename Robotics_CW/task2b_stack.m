@@ -138,6 +138,9 @@ plot_scene(current_q, cubes_start, holders, 0, d1,a2,a3,L_tip_total,delta, ...
 pause(2); % Wait to reach home physically
 
 %% 6. MAIN PICK AND PLACE LOOP
+% Check if stacking mode is enabled (all holders have the same coordinates)
+is_stacking_mode = size(unique(holders, 'rows'), 1) == 1;
+
 try
     for i = 1:size(cubes_start, 1)
 
@@ -145,9 +148,15 @@ try
         cz_pick      = cube_height / 2;
 
         [hx, hy, ~]  = grid_to_world(holders(i,1), holders(i,2), 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
-        cz_place     = cube_height / 2;
 
-        hover_z = 0.04; % Increased hover to prevent physical collision
+        if is_stacking_mode
+            % Increase z-axis height by 2.5cm (cube_height) for each stacked cube
+            cz_place = cube_height / 2 + (i - 1) * cube_height;
+            hover_z  = 0.08; % Increased hover to clear the stack during transit
+        else
+            cz_place = cube_height / 2;
+            hover_z  = 0.04; % Increased hover to prevent physical collision
+        end
 
         fprintf('Moving Cube %d: Grid(%d,%d) -> Grid(%d,%d)\n', ...
             i, cubes_start(i,1), cubes_start(i,2), holders(i,1), holders(i,2));
@@ -252,26 +261,7 @@ catch ME
     fprintf('Program interrupted: %s\n', ME.message);
 end
 
-%% 7. END POSITION
-end_x = 0.175; end_y = 0.225; end_z = 0.10; end_pitch = -10;
-[q1,q2,q3,q4,valid] = inverse_kinematics(end_x,end_y,end_z,end_pitch, ...
-    d1,a2,a3,L_tip_total,delta,joint_limits);
-
-if ~valid
-    error('Mathematical end position unreachable!');
-end
-
-current_q = [q1, q2, q3, q4];
-
-% Move physical robot to Home initially
-phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate);
-send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
-
-attached_cube_idx = 0;
-plot_scene(current_q, cubes_start, holders, 0, d1,a2,a3,L_tip_total,delta, ...
-    GRID_UNIT, ROBOT_GX, ROBOT_GY);
-pause(2); % Wait to reach home physically
-%% 8. CLEANUP
+%% 7. CLEANUP
 fprintf('\n--- Shutting Down ---\n');
 for k = 1:length(IDs)
     write1ByteTxRx(port_num, PROTOCOL_VERSION, IDs(k), ADDR_PRO_TORQUE_ENABLE, TORQUE_DISABLE);
@@ -338,7 +328,10 @@ for k = 1:size(cubes, 1)
         plot3(P_tip(1), P_tip(2), P_tip(3), 's', 'MarkerSize', 12, 'MarkerFaceColor', cols{cubes(k,3)});
     else
         [cx, cy, ~] = grid_to_world(cubes(k,1), cubes(k,2), 0, unit, rx, ry);
-        plot3(cx, cy, 0.0125, 's', 'MarkerSize', 12, 'MarkerFaceColor', cols{cubes(k,3)});
+        % Calculate stack index natively to display correct height in simulation
+        stack_idx = sum(cubes(1:k, 1) == cubes(k, 1) & cubes(1:k, 2) == cubes(k, 2));
+        cz = 0.0125 + (stack_idx - 1) * 0.025;
+        plot3(cx, cy, cz, 's', 'MarkerSize', 12, 'MarkerFaceColor', cols{cubes(k,3)});
     end
 end
 end

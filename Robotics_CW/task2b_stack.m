@@ -1,4 +1,4 @@
-% task2a_real_merged.m
+% task2b_stack.m
 % Merges Task 2a Simulation (path planning) with Real Robot Control
 
 clear; clc; close all;
@@ -30,13 +30,15 @@ PROTOCOL_VERSION = 2.0;
 ID_GRIPPER = 15;
 IDs        = [11, 12, 13, 14, 15]; % Base, Shoulder, Elbow, Wrist, Gripper
 BAUDRATE   = 1000000;
-DEVICENAME = 'COM7'; % Adjust if needed
+DEVICENAME = 'COM8'; % Adjust if needed
 
 TORQUE_ENABLE  = 1;
 TORQUE_DISABLE = 0;
-SAFE_PROFILE_VEL   = 30;
+SAFE_PROFILE_VEL   = 150;
 GRIPPER_PROFILE_VEL = 200; % Much faster for snappy grip
-SAFE_PROFILE_ACCEL = 10;
+SAFE_PROFILE_ACCEL = 30;
+global MOTOR_11_OFFSET;
+MOTOR_11_OFFSET    = deg2rad(2);
 
 port_num = portHandler(DEVICENAME);
 packetHandler();
@@ -79,15 +81,15 @@ ROBOT_GY  = 3;
 
 target_cubes = [
     9,  12,  1;
-    16,  11,  2;
-    17, 7, 3
+    17,  12,  2;
+    17, 6, 3
     ];
 cubes_start = target_cubes;
 
 holders = [
     2,  3;
-    2,  10;
-    9, 8
+    2,  3;
+    2,  3
     ];
 
 cube_colors  = {'r', 'g', 'b'};
@@ -99,7 +101,7 @@ a2 = sqrt(0.128^2 + 0.024^2);
 delta = atan2(0.024, 0.128);
 a3 = 0.124;
 a4 = 0.126;
-L_finger    = 0.045; % Task2a includes finger length for pick and place
+L_finger    = 0.025; % Task2a includes finger length for pick and place
 L_tip_total = a4 + L_finger;
 
 offset_classmate = deg2rad(90 - rad2deg(delta));
@@ -129,7 +131,7 @@ end
 current_q = [q1, q2, q3, q4];
 
 % Move physical robot to Home initially
-phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate);
+phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, false);
 send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
 
 attached_cube_idx = 0;
@@ -138,25 +140,16 @@ plot_scene(current_q, cubes_start, holders, 0, d1,a2,a3,L_tip_total,delta, ...
 pause(2); % Wait to reach home physically
 
 %% 6. MAIN PICK AND PLACE LOOP
-% Check if stacking mode is enabled (all holders have the same coordinates)
-is_stacking_mode = size(unique(holders, 'rows'), 1) == 1;
-
 try
     for i = 1:size(cubes_start, 1)
 
         [cx, cy, ~]  = grid_to_world(cubes_start(i,1), cubes_start(i,2), 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
-        cz_pick      = cube_height / 2;
+        cz_pick      = cube_height/2+0.015;
 
         [hx, hy, ~]  = grid_to_world(holders(i,1), holders(i,2), 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
+        cz_place = (cube_height/2 + 0.015) + (i-1)*0.025;   % 2.5 cm step
 
-        if is_stacking_mode
-            % Increase z-axis height by 2.5cm (cube_height) for each stacked cube
-            cz_place = cube_height / 2 + (i - 1) * cube_height;
-            hover_z  = 0.08; % Increased hover to clear the stack during transit
-        else
-            cz_place = cube_height / 2;
-            hover_z  = 0.04; % Increased hover to prevent physical collision
-        end
+        hover_z = 0.04; % Increased hover to prevent physical collision
 
         fprintf('Moving Cube %d: Grid(%d,%d) -> Grid(%d,%d)\n', ...
             i, cubes_start(i,1), cubes_start(i,2), holders(i,1), holders(i,2));
@@ -196,7 +189,8 @@ try
             current_pos         = forward_kinematics(current_q, d1,a2,a3,L_tip_total,delta);
             current_pitch_val   = current_q(2) + delta + current_q(3) + current_q(4);
 
-            num_steps = 30; % Adjust for smoothness
+            num_steps = 12;     % 10–15 is good for real robot
+            pause(0.03);        % 0.02–0.05 (lower jerk)
             traj_x     = linspace(current_pos(1), goal_x,     num_steps);
             traj_y     = linspace(current_pos(2), goal_y,     num_steps);
             traj_z     = linspace(current_pos(3), goal_z,     num_steps);
@@ -215,7 +209,7 @@ try
                             attached_cube_idx = i;
                             current_gripper = GRIPPER_CLOSE;
                             % Snap grab: Send immediately and pause briefly
-                            phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate);
+                            phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, attached_cube_idx > 0);
                             send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
                             pause(0.3); % Quick pause for grip to finish
                         elseif action == 3  % PLACE
@@ -223,14 +217,14 @@ try
                             attached_cube_idx   = 0;
                             current_gripper = GRIPPER_OPEN;
                             % Snap release: Send immediately and pause briefly
-                            phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate);
+                            phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, attached_cube_idx > 0);
                             send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
                             pause(0.3); % Quick pause for release to finish
                         end
                     end
 
                     % Send regular trajectory step
-                    phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate);
+                    phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, attached_cube_idx > 0);
                     send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
 
                     if attached_cube_idx > 0
@@ -245,7 +239,7 @@ try
                     % Extra pause for grab/release sending
                     if t == num_steps && (action == 1 || action == 3)
                         % Re-send to make sure gripper moves while arm stationary
-                        phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate);
+                        phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, attached_cube_idx > 0);
                         send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
                         pause(0.5);
                     end
@@ -261,7 +255,26 @@ catch ME
     fprintf('Program interrupted: %s\n', ME.message);
 end
 
-%% 7. CLEANUP
+%% 7. END POSITION
+end_x = 0.175; end_y = 0; end_z = 0.15; end_pitch = 0;
+[q1,q2,q3,q4,valid] = inverse_kinematics(end_x,end_y,end_z,end_pitch, ...
+    d1,a2,a3,L_tip_total,delta,joint_limits);
+
+if ~valid
+    error('Mathematical end position unreachable!');
+end
+
+current_q = [q1, q2, q3, q4];
+
+% Move physical robot to Home initially
+phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, false);
+send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
+
+attached_cube_idx = 0;
+plot_scene(current_q, cubes_start, holders, 0, d1,a2,a3,L_tip_total,delta, ...
+    GRID_UNIT, ROBOT_GX, ROBOT_GY);
+pause(2); % Wait to reach home physically
+%% 8. CLEANUP
 fprintf('\n--- Shutting Down ---\n');
 for k = 1:length(IDs)
     write1ByteTxRx(port_num, PROTOCOL_VERSION, IDs(k), ADDR_PRO_TORQUE_ENABLE, TORQUE_DISABLE);
@@ -274,10 +287,15 @@ unloadlibrary(lib_name);
 
 %% --- HELPER FUNCTIONS ---
 
-function phys_angles = sim_to_phys_angles(sim_q, gripper_q, delta, offset_classmate)
+function phys_angles = sim_to_phys_angles(sim_q, gripper_q, delta, offset_classmate, is_placing)
 % Converts mathematical DH angles to the expected Physical Motor frame mapping
 % Dofbot neutral is 180 degrees (2048 ticks) for all motors.
-q1 = sim_q(1);
+global MOTOR_11_OFFSET;
+if is_placing
+    q1 = sim_q(1) + MOTOR_11_OFFSET;
+else
+    q1 = sim_q(1);
+end
 
 % Fix from Robot_Control_Single_225 (reverse physical mapping direction for motors)
 q2 = -(sim_q(2) + delta - offset_classmate);
@@ -328,10 +346,7 @@ for k = 1:size(cubes, 1)
         plot3(P_tip(1), P_tip(2), P_tip(3), 's', 'MarkerSize', 12, 'MarkerFaceColor', cols{cubes(k,3)});
     else
         [cx, cy, ~] = grid_to_world(cubes(k,1), cubes(k,2), 0, unit, rx, ry);
-        % Calculate stack index natively to display correct height in simulation
-        stack_idx = sum(cubes(1:k, 1) == cubes(k, 1) & cubes(1:k, 2) == cubes(k, 2));
-        cz = 0.0125 + (stack_idx - 1) * 0.025;
-        plot3(cx, cy, cz, 's', 'MarkerSize', 12, 'MarkerFaceColor', cols{cubes(k,3)});
+        plot3(cx, cy, 0.0125, 's', 'MarkerSize', 12, 'MarkerFaceColor', cols{cubes(k,3)});
     end
 end
 end

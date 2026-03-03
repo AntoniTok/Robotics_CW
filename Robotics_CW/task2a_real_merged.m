@@ -34,9 +34,9 @@ DEVICENAME = 'COM7'; % Adjust if needed
 
 TORQUE_ENABLE  = 1;
 TORQUE_DISABLE = 0;
-SAFE_PROFILE_VEL   = 570;
+SAFE_PROFILE_VEL   = 150;
 GRIPPER_PROFILE_VEL = 200; % Much faster for snappy grip
-SAFE_PROFILE_ACCEL = 20;
+SAFE_PROFILE_ACCEL = 30;
 global MOTOR_11_OFFSET;
 MOTOR_11_OFFSET    = deg2rad(2.2);
 
@@ -148,7 +148,6 @@ try
 
         [hx, hy, ~]  = grid_to_world(holders(i,1), holders(i,2), 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
 
-        % 把底座角度偏移量平滑地算入目标放置的世界坐标
         global MOTOR_11_OFFSET;
         theta_h = atan2(hy, hx);
         r_h = sqrt(hx^2 + hy^2);
@@ -297,7 +296,7 @@ unloadlibrary(lib_name);
 function phys_angles = sim_to_phys_angles(sim_q, gripper_q, delta, offset_classmate, is_placing)
 % Converts mathematical DH angles to the expected Physical Motor frame mapping
 % Dofbot neutral is 180 degrees (2048 ticks) for all motors.
-q1 = sim_q(1); % 移除直接叠加的方式，避免瞬间跳变
+q1 = sim_q(1);
 
 % Fix from Robot_Control_Single_225 (reverse physical mapping direction for motors)
 q2 = -(sim_q(2) + delta - offset_classmate);

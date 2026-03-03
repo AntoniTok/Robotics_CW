@@ -38,7 +38,7 @@ SAFE_PROFILE_VEL   = 150;
 GRIPPER_PROFILE_VEL = 200; % Much faster for snappy grip
 SAFE_PROFILE_ACCEL = 30;
 global MOTOR_11_OFFSET;
-MOTOR_11_OFFSET    = deg2rad(2);
+MOTOR_11_OFFSET    = deg2rad(2.2);
 
 port_num = portHandler(DEVICENAME);
 packetHandler();
@@ -101,7 +101,7 @@ a2 = sqrt(0.128^2 + 0.024^2);
 delta = atan2(0.024, 0.128);
 a3 = 0.124;
 a4 = 0.126;
-L_finger    = 0.025; % Task2a includes finger length for pick and place
+L_finger    = 0.02; % Task2a includes finger length for pick and place
 L_tip_total = a4 + L_finger;
 
 offset_classmate = deg2rad(90 - rad2deg(delta));
@@ -144,10 +144,17 @@ try
     for i = 1:size(cubes_start, 1)
 
         [cx, cy, ~]  = grid_to_world(cubes_start(i,1), cubes_start(i,2), 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
-        cz_pick      = cube_height/2+0.015;
+        cz_pick      = cube_height/2+0.025;
 
         [hx, hy, ~]  = grid_to_world(holders(i,1), holders(i,2), 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
-        cz_place     = cube_height/2+0.015;
+
+        global MOTOR_11_OFFSET;
+        theta_h = atan2(hy, hx);
+        r_h = sqrt(hx^2 + hy^2);
+        hx = r_h * cos(theta_h + MOTOR_11_OFFSET);
+        hy = r_h * sin(theta_h + MOTOR_11_OFFSET);
+
+        cz_place     = cube_height/2+0.017;
 
         hover_z = 0.04; % Increased hover to prevent physical collision
 
@@ -255,7 +262,7 @@ catch ME
 end
 
 %% 7. END POSITION
-end_x = 0.175; end_y = 0; end_z = 0.15; end_pitch = 0;
+end_x = 0.15; end_y = 0; end_z = 0.15; end_pitch = -0;
 [q1,q2,q3,q4,valid] = inverse_kinematics(end_x,end_y,end_z,end_pitch, ...
     d1,a2,a3,L_tip_total,delta,joint_limits);
 
@@ -289,12 +296,7 @@ unloadlibrary(lib_name);
 function phys_angles = sim_to_phys_angles(sim_q, gripper_q, delta, offset_classmate, is_placing)
 % Converts mathematical DH angles to the expected Physical Motor frame mapping
 % Dofbot neutral is 180 degrees (2048 ticks) for all motors.
-global MOTOR_11_OFFSET;
-if is_placing
-    q1 = sim_q(1) + MOTOR_11_OFFSET;
-else
-    q1 = sim_q(1);
-end
+q1 = sim_q(1);
 
 % Fix from Robot_Control_Single_225 (reverse physical mapping direction for motors)
 q2 = -(sim_q(2) + delta - offset_classmate);

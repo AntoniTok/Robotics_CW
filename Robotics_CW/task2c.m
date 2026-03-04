@@ -1,5 +1,6 @@
-% task2a_real_merged.m
-% Merges Task 2a Simulation (path planning) with Real Robot Control
+% task2c.m
+% Task 2c: Move the tool through the gates
+% Based on task2a_working.m
 
 clear; clc; close all;
 
@@ -34,8 +35,8 @@ DEVICENAME = 'COM7'; % Adjust if needed
 
 TORQUE_ENABLE  = 1;
 TORQUE_DISABLE = 0;
-SAFE_PROFILE_VEL   = 150;
-GRIPPER_PROFILE_VEL = 200; % Much faster for snappy grip
+SAFE_PROFILE_VEL   = 120; % slightly slower for precise gate navigation
+GRIPPER_PROFILE_VEL = 200;
 SAFE_PROFILE_ACCEL = 30;
 global MOTOR_11_OFFSET;
 MOTOR_11_OFFSET    = deg2rad(2);
@@ -63,13 +64,12 @@ for k = 1:length(IDs)
         write4ByteTxRx(port_num, PROTOCOL_VERSION, IDs(k), ADDR_PRO_PROFILE_VELOCITY, SAFE_PROFILE_VEL);
     end
 end
-fprintf('Torque, Acceleration & Velocity Profiles ENABLED (Gripper boosted).\n');
+fprintf('Torque, Acceleration & Velocity Profiles ENABLED.\n');
 
-%% 2. GRIPPER SETTINGS (Adjust as needed)
-% Define the offset in radians from 180 degrees (0 in IK frame means 180 in physical)
-GRIPPER_OPEN  = deg2rad(-45); % Open position
-GRIPPER_CLOSE = deg2rad(20);  % Tightened: Increased from 0 to 40 to grip harder
-current_gripper = GRIPPER_OPEN;
+%% 2. GRIPPER SETTINGS
+GRIPPER_OPEN  = deg2rad(-45);
+GRIPPER_CLOSE = deg2rad(20);
+current_gripper = GRIPPER_CLOSE; % Keep closed for passing through gate
 
 %% 3. GRID & SCENE CONFIGURATION
 GRID_UNIT = 0.025;
@@ -79,21 +79,19 @@ GRID_H    = 12;
 ROBOT_GX  = 9;
 ROBOT_GY  = 3;
 
-target_cubes = [
-    9,  12,  1;
-    16,  10,  2;
-    17, 7, 3
-    ];
-cubes_start = target_cubes;
-
-holders = [
-    3,  3;
-    3,  9;
-    9, 7
+% Define the gates
+% gates format: [grid_x, grid_y, orientation (1 for X-aligned passage, 2 for Y-aligned passage)]
+% Since gates can appear anywhere, these are placeholders for Demo Day.
+gates = [
+    5, 7, 1; % passing along X axis
+    12, 10, 2; % passing along Y axis
+    15, 6, 1
     ];
 
-cube_colors  = {'r', 'g', 'b'};
-cube_height  = 0.025;
+% (No cubes needed for this specific gate traversal task unless stated)
+target_cubes = [];
+cubes_start = [];
+holders = [];
 
 %% 4. ROBOT PARAMETERS
 d1 = 0.077;
@@ -101,7 +99,7 @@ a2 = sqrt(0.128^2 + 0.024^2);
 delta = atan2(0.024, 0.128);
 a3 = 0.124;
 a4 = 0.126;
-L_finger    = 0.025; % Task2a includes finger length for pick and place
+L_finger    = 0.025;
 L_tip_total = a4 + L_finger;
 
 offset_classmate = deg2rad(90 - rad2deg(delta));
@@ -114,13 +112,13 @@ joint_limits = [
     deg2rad(-135),             deg2rad(135)
     ];
 
-fig = figure('Name','Task 2a: Real Pick and Place','Color','w','Position',[100 100 1200 800]);
+fig = figure('Name','Task 2c: Passing Through Gates','Color','w','Position',[100 100 1200 800]);
 view(45, 30); axis equal; grid on; hold on;
 xlabel('World X (m)'); ylabel('World Y (m)'); zlabel('World Z (m)');
 axis([-0.3 0.4 -0.4 0.4 0 0.6]);
 
 %% 5. INITIALIZATION
-home_x = 0.3; home_y = 0; home_z = 0.20; home_pitch = 0;
+home_x = 0.25; home_y = 0; home_z = 0.20; home_pitch = 0;
 [q1,q2,q3,q4,valid] = inverse_kinematics(home_x,home_y,home_z,home_pitch, ...
     d1,a2,a3,L_tip_total,delta,joint_limits);
 
@@ -134,62 +132,59 @@ current_q = [q1, q2, q3, q4];
 phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, false);
 send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
 
-attached_cube_idx = 0;
-plot_scene(current_q, cubes_start, holders, 0, d1,a2,a3,L_tip_total,delta, ...
-    GRID_UNIT, ROBOT_GX, ROBOT_GY);
+plot_scene_gates(current_q, gates, d1,a2,a3,L_tip_total,delta, GRID_UNIT, ROBOT_GX, ROBOT_GY);
 pause(2); % Wait to reach home physically
 
-%% 6. MAIN PICK AND PLACE LOOP
+%% 6. MAIN GATE PASSAGE LOOP
 try
-    for i = 1:size(cubes_start, 1)
+    for i = 1:size(gates, 1)
 
-        [cx, cy, ~]  = grid_to_world(cubes_start(i,1), cubes_start(i,2), 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
-        cz_pick      = cube_height/2+0.015;
+        g_x = gates(i, 1);
+        g_y = gates(i, 2);
+        g_ori = gates(i, 3);
 
-        [hx, hy, ~]  = grid_to_world(holders(i,1), holders(i,2), 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
-        cz_place     = cube_height/2+0.008;
+        [wx, wy, ~]  = grid_to_world(g_x, g_y, 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
 
-        hover_z = 0.04; % Increased hover to prevent physical collision
+        % Must be below line on gate, and not touch gates.
+        % Typically, setting Z slightly above 0 with a flat pitch is best.
+        z_pass = 0.02; % 2 cm above ground
+        hover_z = 0.06; % Hover height for transit between gates
 
-        fprintf('Moving Cube %d: Grid(%d,%d) -> Grid(%d,%d)\n', ...
-            i, cubes_start(i,1), cubes_start(i,2), holders(i,1), holders(i,2));
-
-        % Pitch selection
-        best_pitch  = -pi/2;
-        test_angles = deg2rad(-90 : 5 : -45);
-        for angle = test_angles
-            [~,~,~,~, vp]  = inverse_kinematics(cx, cy, cz_pick,          angle, d1,a2,a3,L_tip_total,delta,joint_limits);
-            [~,~,~,~, vph] = inverse_kinematics(cx, cy, cz_pick + hover_z, angle, d1,a2,a3,L_tip_total,delta,joint_limits);
-            [~,~,~,~, vd]  = inverse_kinematics(hx, hy, cz_place,          angle, d1,a2,a3,L_tip_total,delta,joint_limits);
-            [~,~,~,~, vdh] = inverse_kinematics(hx, hy, cz_place + hover_z,angle, d1,a2,a3,L_tip_total,delta,joint_limits);
-
-            if vp && vph && vd && vdh
-                best_pitch = angle;
-                fprintf('  Valid pitch: %.1f deg\n', rad2deg(best_pitch));
-                break;
-            end
+        % Determine approach and exit offsets based on orientation
+        pass_dist = 0.08; % distance to start before gate and end after gate
+        if g_ori == 1
+            % Pass along X axis
+            wpt_pre_x = wx - pass_dist; wpt_pre_y = wy;
+            wpt_post_x = wx + pass_dist; wpt_post_y = wy;
+        else
+            % Pass along Y axis
+            wpt_pre_x = wx; wpt_pre_y = wy - pass_dist;
+            wpt_post_x = wx; wpt_post_y = wy + pass_dist;
         end
 
-        % Waypoints: [x, y, z, pitch, action]
-        % action: 0=Stay Open, 1=Close (Pick), 2=Stay Closed, 3=Open (Place)
+        fprintf('Passing Gate %d at Grid(%d,%d)\n', i, g_x, g_y);
+
+        % Try a straight flat pitch first to easily pass under the line
+        best_pitch = 0;
+
+        % Waypoints: [x, y, z, pitch]
         waypoints = [
-            cx, cy, cz_pick  + hover_z, best_pitch, 0;  % Approach pick
-            cx, cy, cz_pick,            best_pitch, 1;  % Pick (grip)
-            cx, cy, cz_pick  + hover_z, best_pitch, 2;  % Lift
-            hx, hy, cz_place + hover_z, best_pitch, 2;  % Approach place
-            hx, hy, cz_place,           best_pitch, 3;  % Place (release)
-            hx, hy, cz_place + hover_z, best_pitch, 0;  % Retract
+            wpt_pre_x, wpt_pre_y, hover_z, best_pitch; % hover before gate
+            wpt_pre_x, wpt_pre_y, z_pass,  best_pitch; % lower down
+            wx,        wy,        z_pass,  best_pitch; % drive through center
+            wpt_post_x, wpt_post_y, z_pass,  best_pitch; % exit on other side
+            wpt_post_x, wpt_post_y, hover_z, best_pitch; % lift back up
             ];
 
         for wp_idx = 1:size(waypoints, 1)
             target    = waypoints(wp_idx, :);
             goal_x    = target(1); goal_y = target(2); goal_z = target(3);
-            goal_pitch = target(4); action  = target(5);
+            goal_pitch = target(4);
 
             current_pos         = forward_kinematics(current_q, d1,a2,a3,L_tip_total,delta);
             current_pitch_val   = current_q(2) + delta + current_q(3) + current_q(4);
 
-            num_steps = 12; % Adjust for smoothness
+            num_steps = 15; % Smooth steps
             traj_x     = linspace(current_pos(1), goal_x,     num_steps);
             traj_y     = linspace(current_pos(2), goal_y,     num_steps);
             traj_z     = linspace(current_pos(3), goal_z,     num_steps);
@@ -203,48 +198,16 @@ try
                 if valid_t
                     current_q = [q1_t, q2_t, q3_t, q4_t];
 
-                    if t == num_steps
-                        if action == 1      % PICK
-                            attached_cube_idx = i;
-                            current_gripper = GRIPPER_CLOSE;
-                            % Snap grab: Send immediately and pause briefly
-                            phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, attached_cube_idx > 0);
-                            send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
-                            pause(0.3); % Quick pause for grip to finish
-                        elseif action == 3  % PLACE
-                            cubes_start(i, 1:2) = holders(i, :);
-                            attached_cube_idx   = 0;
-                            current_gripper = GRIPPER_OPEN;
-                            % Snap release: Send immediately and pause briefly
-                            phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, attached_cube_idx > 0);
-                            send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
-                            pause(0.3); % Quick pause for release to finish
-                        end
-                    end
-
-                    % Send regular trajectory step
-                    phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, attached_cube_idx > 0);
+                    phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, false);
                     send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
 
-                    if attached_cube_idx > 0
-                        cubes_start(attached_cube_idx, 1:2) = [-999, -999]; % hide; drawn at tip
-                    end
-
                     % Visual Simulation Sync
-                    plot_scene(current_q, cubes_start, holders, attached_cube_idx, ...
-                        d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
+                    plot_scene_gates(current_q, gates, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
                     drawnow;
 
-                    % Extra pause for grab/release sending
-                    if t == num_steps && (action == 1 || action == 3)
-                        % Re-send to make sure gripper moves while arm stationary
-                        phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, attached_cube_idx > 0);
-                        send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
-                        pause(0.5);
-                    end
-
-                    % Wait slightly to make simulation pace match Dynamixel
-                    pause(0.01);
+                    pause(0.015);
+                else
+                    warning('Trajectory point unreachable for Gate %d!', i);
                 end
             end
         end
@@ -259,20 +222,14 @@ end_x = 0.175; end_y = 0; end_z = 0.15; end_pitch = 0;
 [q1,q2,q3,q4,valid] = inverse_kinematics(end_x,end_y,end_z,end_pitch, ...
     d1,a2,a3,L_tip_total,delta,joint_limits);
 
-if ~valid
-    error('Mathematical end position unreachable!');
+if valid
+    current_q = [q1, q2, q3, q4];
+    phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, false);
+    send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
+    plot_scene_gates(current_q, gates, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
+    pause(2);
 end
 
-current_q = [q1, q2, q3, q4];
-
-% Move physical robot to Home initially
-phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, false);
-send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
-
-attached_cube_idx = 0;
-plot_scene(current_q, cubes_start, holders, 0, d1,a2,a3,L_tip_total,delta, ...
-    GRID_UNIT, ROBOT_GX, ROBOT_GY);
-pause(2); % Wait to reach home physically
 %% 8. CLEANUP
 fprintf('\n--- Shutting Down ---\n');
 for k = 1:length(IDs)
@@ -287,16 +244,12 @@ unloadlibrary(lib_name);
 %% --- HELPER FUNCTIONS ---
 
 function phys_angles = sim_to_phys_angles(sim_q, gripper_q, delta, offset_classmate, is_placing)
-% Converts mathematical DH angles to the expected Physical Motor frame mapping
-% Dofbot neutral is 180 degrees (2048 ticks) for all motors.
 global MOTOR_11_OFFSET;
 if is_placing
     q1 = sim_q(1) + MOTOR_11_OFFSET;
 else
     q1 = sim_q(1);
 end
-
-% Fix from Robot_Control_Single_225 (reverse physical mapping direction for motors)
 q2 = -(sim_q(2) + delta - offset_classmate);
 q3 = -(sim_q(3) + offset_classmate);
 q4 = -sim_q(4);
@@ -314,7 +267,6 @@ for k = 1:5
     deg_val = rad2deg(phys_angles(k));
     pos_tick = round(deg_val * (4096 / 360));
     pos_tick = max(0, min(4095, pos_tick));
-
     groupSyncWriteAddParam(groupwrite_pos, IDs(k), typecast(int32(pos_tick), 'uint32'), LEN_GOAL_POSITION);
 end
 groupSyncWriteTxPacket(groupwrite_pos);
@@ -326,28 +278,39 @@ wy = (r_gx - gx)  * unit;
 wz =  gz_scale     * unit;
 end
 
-function plot_scene(q, cubes, holders, attached_idx, d1,a2,a3,L4,delta,unit,rx,ry)
+function plot_scene_gates(q, gates, d1,a2,a3,L4,delta,unit,rx,ry)
 cla; hold on; grid on; axis equal;
 axis([-0.3 0.4 -0.4 0.4 0 0.6]);
 view(45, 30);
 xlabel('X'); ylabel('Y'); zlabel('Z');
 
-for k = 1:size(holders, 1)
-    [hx, hy, ~] = grid_to_world(holders(k,1), holders(k,2), 0, unit, rx, ry);
-    plot3(hx, hy, 0, 'ks', 'MarkerSize', 10, 'LineWidth', 2);
+% Plot gates as simple 3D arches
+for k = 1:size(gates, 1)
+    [gx, gy, ~] = grid_to_world(gates(k,1), gates(k,2), 0, unit, rx, ry);
+
+    g_width = 0.10;
+    g_height = 0.08;
+    g_depth = 0.02;
+
+    ori = gates(k,3);
+
+    if ori == 1
+        % Passing X axis, gate faces X, meaning posts span across Y
+        p1 = [gx, gy - g_width/2, 0];
+        p2 = [gx, gy + g_width/2, 0];
+    else
+        % Passing Y axis, gate faces Y, meaning posts span across X
+        p1 = [gx - g_width/2, gy, 0];
+        p2 = [gx + g_width/2, gy, 0];
+    end
+
+    % Draw two vertical posts and one horizontal bar
+    plot3([p1(1) p1(1)], [p1(2) p1(2)], [0 g_height], 'k', 'LineWidth', 4);
+    plot3([p2(1) p2(1)], [p2(2) p2(2)], [0 g_height], 'k', 'LineWidth', 4);
+    plot3([p1(1) p2(1)], [p1(2) p2(2)], [g_height g_height], 'k', 'LineWidth', 4);
 end
 
 P_tip = plot_robot(q, d1,a2,a3,L4,delta, 0.04);
-
-cols = {'r','g','b'};
-for k = 1:size(cubes, 1)
-    if k == attached_idx
-        plot3(P_tip(1), P_tip(2), P_tip(3), 's', 'MarkerSize', 12, 'MarkerFaceColor', cols{cubes(k,3)});
-    else
-        [cx, cy, ~] = grid_to_world(cubes(k,1), cubes(k,2), 0, unit, rx, ry);
-        plot3(cx, cy, 0.0125, 's', 'MarkerSize', 12, 'MarkerFaceColor', cols{cubes(k,3)});
-    end
-end
 end
 
 function pos = forward_kinematics(q, d1,a2,a3,L4,delta)

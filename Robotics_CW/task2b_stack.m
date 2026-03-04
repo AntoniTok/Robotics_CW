@@ -1,4 +1,4 @@
-% task2b_stack.m
+%task2b_stack.m
 % Merges Task 2a Simulation (path planning) with Real Robot Control
 
 clear; clc; close all;
@@ -38,7 +38,7 @@ SAFE_PROFILE_VEL   = 150;
 GRIPPER_PROFILE_VEL = 200; % Much faster for snappy grip
 SAFE_PROFILE_ACCEL = 30;
 global MOTOR_11_OFFSET;
-MOTOR_11_OFFSET    = deg2rad(2);
+MOTOR_11_OFFSET    = deg2rad(1);
 
 port_num = portHandler(DEVICENAME);
 packetHandler();
@@ -67,8 +67,8 @@ fprintf('Torque, Acceleration & Velocity Profiles ENABLED (Gripper boosted).\n')
 
 %% 2. GRIPPER SETTINGS (Adjust as needed)
 % Define the offset in radians from 180 degrees (0 in IK frame means 180 in physical)
-GRIPPER_OPEN  = deg2rad(-45); % Open position
-GRIPPER_CLOSE = deg2rad(20);  % Tightened: Increased from 0 to 40 to grip harder
+GRIPPER_OPEN  = deg2rad(-55); % Open position
+GRIPPER_CLOSE = deg2rad(5);  % Tightened: Increased from 0 to 40 to grip harder
 current_gripper = GRIPPER_OPEN;
 
 %% 3. GRID & SCENE CONFIGURATION
@@ -81,15 +81,17 @@ ROBOT_GY  = 3;
 
 target_cubes = [
     9,  12,  1;
-    17,  12,  2;
-    17, 6, 3
+    16,  10,  2;
+    17, 7, 3
     ];
 cubes_start = target_cubes;
 
+bridge_clearance_z = 0.03; % example: must be BELOW bridge, tune this
+
 holders = [
-    2,  3;
-    2,  3;
-    2,  3
+    3,  3;
+    3,  3;
+    3,  3
     ];
 
 cube_colors  = {'r', 'g', 'b'};
@@ -109,8 +111,8 @@ shift_q2 = offset_classmate - delta;
 shift_q3 = -offset_classmate;
 joint_limits = [
     deg2rad(-180), deg2rad(180);
-    deg2rad(-90)  + shift_q2,  deg2rad(90) + shift_q2;
-    deg2rad(-75)  + shift_q3,  deg2rad(85) + shift_q3;
+    deg2rad(-90)  + shift_q2,  deg2rad(100) + shift_q2;
+    deg2rad(-75)  + shift_q3,  deg2rad(105) + shift_q3;
     deg2rad(-135),             deg2rad(135)
     ];
 
@@ -149,14 +151,14 @@ try
         [hx, hy, ~]  = grid_to_world(holders(i,1), holders(i,2), 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
         cz_place = (cube_height/2 + 0.015) + (i-1)*0.025;   % 2.5 cm step
 
-        hover_z = 0.04; % Increased hover to prevent physical collision
+        hover_z = 0.06; % Increased hover to prevent physical collision
 
         fprintf('Moving Cube %d: Grid(%d,%d) -> Grid(%d,%d)\n', ...
             i, cubes_start(i,1), cubes_start(i,2), holders(i,1), holders(i,2));
 
         % Pitch selection
         best_pitch  = -pi/2;
-        test_angles = deg2rad(-90 : 5 : -45);
+        test_angles = deg2rad(-90 : 5 : 90);
         for angle = test_angles
             [~,~,~,~, vp]  = inverse_kinematics(cx, cy, cz_pick,          angle, d1,a2,a3,L_tip_total,delta,joint_limits);
             [~,~,~,~, vph] = inverse_kinematics(cx, cy, cz_pick + hover_z, angle, d1,a2,a3,L_tip_total,delta,joint_limits);
@@ -172,14 +174,64 @@ try
 
         % Waypoints: [x, y, z, pitch, action]
         % action: 0=Stay Open, 1=Close (Pick), 2=Stay Closed, 3=Open (Place)
-        waypoints = [
-            cx, cy, cz_pick  + hover_z, best_pitch, 0;  % Approach pick
-            cx, cy, cz_pick,            best_pitch, 1;  % Pick (grip)
-            cx, cy, cz_pick  + hover_z, best_pitch, 2;  % Lift
-            hx, hy, cz_place + hover_z, best_pitch, 2;  % Approach place
-            hx, hy, cz_place,           best_pitch, 3;  % Place (release)
-            hx, hy, cz_place + hover_z, best_pitch, 0;  % Retract
+        under_bridge = (i == 1);   % cube 1 special-case
+
+        if under_bridge
+            pick_pitch = -pi/6;        % parallel to table (horizontal)
+        else
+            pick_pitch = best_pitch;  % your normal pitch result
+        end
+        if under_bridge
+            SAFE_Z_ABOVE = 0.10;     % above 6cm bridge
+            z_corridor   = 0.04;     % under bridge (< 0.06) but above table
+            cz_pick      = cube_height/2 + 0.025;
+
+            approach_dx = -0.03;     % entry offset (near cube)
+            approach_dy =  0.00;
+            GRIP_DY = 0.01;   % 2 cm extra in +Y (tune)
+            gx = cx+ GRIP_DY;
+            gy = cy ;
+
+            EXIT_DIST = 0.09;        % slide-out distance (>= 0.06)
+            entry_x = cx + approach_dx;
+            entry_y = cy + approach_dy;
+            exit_x  = entry_x - EXIT_DIST;
+            exit_y  = entry_y;
+
+            % after you define exit_x, exit_y etc...
+            retreat_x = entry_x-0.1;   % or exit_x, depending how far you want to retreat
+            retreat_y = entry_y;   % keep same y if you want straight back
+            retreat_z = cz_pick;  % stay low while retreating
+
+            waypoints = [
+                exit_x,  exit_y,  SAFE_Z_ABOVE, pick_pitch, 0;
+
+                entry_x, entry_y, z_corridor,   pick_pitch, 0;
+
+                gx,      gy,      z_corridor,       pick_pitch, 0; % slide IN corridor
+                gx,      gy,      cz_pick-0.002,      pick_pitch, 0; % down
+                gx,      gy,      cz_pick-0.002,      pick_pitch, 1; % CLOSE (arm still)
+
+                exit_x,  exit_y,  z_corridor+0.01,   pick_pitch, 2;
+                exit_x,  exit_y,  SAFE_Z_ABOVE,      pick_pitch, 2;
+                hx,      hy,      cz_place+hover_z,  pick_pitch, 2;
+                hx+0.002,      hy-0.006,      cz_place+0.02,     pick_pitch-(pi/2), 2;
+                hx+0.002,      hy-0.006,      cz_place+0.01,     pick_pitch-(pi/2), 3;
+                hx,      hy,      cz_place+hover_z,  best_pitch, 0;
+
             ];
+        else
+
+            % your normal top-down waypoints
+            waypoints = [
+                cx, cy, cz_pick  + hover_z, best_pitch, 0;
+                cx, cy, cz_pick,            best_pitch, 1;
+                cx, cy, cz_pick  + hover_z, best_pitch, 2;
+                hx, hy, cz_place + hover_z, best_pitch, 2;
+                hx, hy, cz_place,           best_pitch, 3;
+                hx, hy, cz_place + hover_z, best_pitch, 0;
+            ];
+        end
 
         for wp_idx = 1:size(waypoints, 1)
             target    = waypoints(wp_idx, :);
@@ -195,6 +247,7 @@ try
             traj_y     = linspace(current_pos(2), goal_y,     num_steps);
             traj_z     = linspace(current_pos(3), goal_z,     num_steps);
             traj_pitch = linspace(current_pitch_val, goal_pitch, num_steps);
+            last_valid_q = current_q;
 
             for t = 1:num_steps
                 [q1_t,q2_t,q3_t,q4_t,valid_t] = inverse_kinematics( ...
@@ -203,23 +256,24 @@ try
 
                 if valid_t
                     current_q = [q1_t, q2_t, q3_t, q4_t];
+                    last_valid_q = current_q;
 
                     if t == num_steps
-                        if action == 1      % PICK
+                        % --- Perform gripper action at the waypoint, even if last IK step failed ---
+                        if action == 1      % PICK close
                             attached_cube_idx = i;
                             current_gripper = GRIPPER_CLOSE;
-                            % Snap grab: Send immediately and pause briefly
-                            phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, attached_cube_idx > 0);
+                            phys_angles = sim_to_phys_angles(last_valid_q, current_gripper, delta, offset_classmate, attached_cube_idx > 0);
                             send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
-                            pause(0.3); % Quick pause for grip to finish
-                        elseif action == 3  % PLACE
+                            pause(0.3);
+
+                        elseif action == 3  % PLACE open
                             cubes_start(i, 1:2) = holders(i, :);
                             attached_cube_idx   = 0;
                             current_gripper = GRIPPER_OPEN;
-                            % Snap release: Send immediately and pause briefly
-                            phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, attached_cube_idx > 0);
+                            phys_angles = sim_to_phys_angles(last_valid_q, current_gripper, delta, offset_classmate, false);
                             send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
-                            pause(0.3); % Quick pause for release to finish
+                            pause(0.3);
                         end
                     end
 
@@ -284,7 +338,6 @@ closePort(port_num);
 fprintf('Port Closed.\n');
 unloadlibrary(lib_name);
 
-
 %% --- HELPER FUNCTIONS ---
 
 function phys_angles = sim_to_phys_angles(sim_q, gripper_q, delta, offset_classmate, is_placing)
@@ -303,7 +356,8 @@ q3 = -(sim_q(3) + offset_classmate);
 q4 = -sim_q(4);
 q5 = gripper_q;
 
-phys_angles = [q1; q2; q3; q4; q5] + deg2rad(180);
+phys_angles = [q1; q2; q3; q4] + deg2rad(180);
+phys_angles = [phys_angles; q5  + deg2rad(210)];
 end
 
 function send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles)
@@ -386,13 +440,18 @@ beta   = acos(cos_b);
 angle_link2 = alpha + beta;
 theta2      = angle_link2 - delta;
 theta4      = phi - (angle_link2 + theta3);
+fprintf("theta2=%.1f deg, lim=[%.1f, %.1f]\n", rad2deg(theta2), rad2deg(limits(2,1)), rad2deg(limits(2,2)));
+fprintf("theta3=%.1f deg, lim=[%.1f, %.1f]\n", rad2deg(theta3), rad2deg(limits(3,1)), rad2deg(limits(3,2)));
 
-if nargin >= 10 && ~isempty(limits)
-    if theta1 < limits(1,1) || theta1 > limits(1,2) || ...
-            theta2 < limits(2,1) || theta2 > limits(2,2) || ...
-            theta3 < limits(3,1) || theta3 > limits(3,2) || ...
-            theta4 < limits(4,1) || theta4 > limits(4,2)
-        isValid = false;
+if  ~isempty(limits)
+    if theta1 < limits(1,1) || theta1 > limits(1,2)
+        disp("limit fail: theta1"); isValid = false;
+    elseif theta2 < limits(2,1) || theta2 > limits(2,2)
+        disp("limit fail: theta2"); isValid = false;
+    elseif theta3 < limits(3,1) || theta3 > limits(3,2)
+        disp("limit fail: theta3"); isValid = false;
+    elseif theta4 < limits(4,1) || theta4 > limits(4,2)
+        disp("limit fail: theta4"); isValid = false;
     end
 end
 end

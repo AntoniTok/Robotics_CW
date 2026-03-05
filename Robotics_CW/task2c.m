@@ -1,11 +1,10 @@
 % task2c.m
-% Task 2c: Move the tool through the gates
-% Based on task2a_working.m
+% Final gate traversal script for Robotics course work
 
 clear; clc; close all;
 
-%% 1. SETTINGS & DYNAMIXEL SETUP
-fprintf('Initializing Dynamixel SDK...\n');
+%% 1. Initialization
+fprintf('Starting robot control...\n');
 lib_name = '';
 if strcmp(computer, 'PCWIN'),       lib_name = 'dxl_x86_c';
 elseif strcmp(computer, 'PCWIN64'), lib_name = 'dxl_x64_c';
@@ -31,11 +30,11 @@ PROTOCOL_VERSION = 2.0;
 ID_GRIPPER = 15;
 IDs        = [11, 12, 13, 14, 15]; % Base, Shoulder, Elbow, Wrist, Gripper
 BAUDRATE   = 1000000;
-DEVICENAME = 'COM7'; % Adjust if needed
+DEVICENAME = 'COM7';
 
 TORQUE_ENABLE  = 1;
 TORQUE_DISABLE = 0;
-SAFE_PROFILE_VEL   = 120; % slightly slower for precise gate navigation
+SAFE_PROFILE_VEL   = 150;
 GRIPPER_PROFILE_VEL = 200;
 SAFE_PROFILE_ACCEL = 30;
 global MOTOR_11_OFFSET;
@@ -64,14 +63,12 @@ for k = 1:length(IDs)
         write4ByteTxRx(port_num, PROTOCOL_VERSION, IDs(k), ADDR_PRO_PROFILE_VELOCITY, SAFE_PROFILE_VEL);
     end
 end
-fprintf('Torque, Acceleration & Velocity Profiles ENABLED.\n');
-
-%% 2. GRIPPER SETTINGS
+%% 2. Gripper Setup
 GRIPPER_OPEN  = deg2rad(-45);
-GRIPPER_CLOSE = deg2rad(20); % Increased from 20 to 25 to grip tighter
-current_gripper = GRIPPER_OPEN; % Start open to pick up the stick
+GRIPPER_CLOSE = deg2rad(23);
+current_gripper = GRIPPER_OPEN;
 
-%% 3. GRID & SCENE CONFIGURATION
+%% 3. Scene Configuration
 GRID_UNIT = 0.025;
 GRID_W    = 17;
 GRID_H    = 12;
@@ -79,26 +76,20 @@ GRID_H    = 12;
 ROBOT_GX  = 9;
 ROBOT_GY  = 3;
 
-% Define the gates
-% gates format: {grid_x, grid_y, orientation ('x' for real world X-axis passage, 'y' for real world Y-axis passage), pass_height_z}
-% Since gates can appear anywhere, these are placeholders for Demo Day.
+% Gate definitions: {gx, gy, orientation, height}
 gates = {
-    5, 7, 'y', 0.08; % passing along real world X axis (60mm height)
-    7, 10, 'x', 0.11; % passing along real world Y axis (90mm height)
-    10, 12, 'x', 0.11; % passing along real world Y axis (90mm height)
-    14, 7, 'x', 0.08; % passing along real world X axis (60mm height)
-
+    5, 7, 'y', 0.08;
+    7, 10, 'x', 0.11;
+    10, 12, 'x', 0.11;
+    14, 7, 'x', 0.08;
     };
 
-% Define the stick location (placeholder for Demo Day)
 stick_start = [17, 1];
-
-% (No cubes needed for this specific gate traversal task unless stated)
 target_cubes = [];
 cubes_start = [];
 holders = [];
 
-%% 4. ROBOT PARAMETERS
+%% 4. Robot Kinematic Parameters
 d1 = 0.077;
 a2 = sqrt(0.128^2 + 0.024^2);
 delta = atan2(0.024, 0.128);
@@ -122,7 +113,7 @@ view(45, 30); axis equal; grid on; hold on;
 xlabel('World X (m)'); ylabel('World Y (m)'); zlabel('World Z (m)');
 axis([-0.3 0.4 -0.4 0.4 0 0.6]);
 
-%% 5. INITIALIZATION
+%% 5. Home Positioning
 home_x = 0.25; home_y = 0; home_z = 0.20; home_pitch = 0;
 [q1,q2,q3,q4,valid] = inverse_kinematics(home_x,home_y,home_z,home_pitch, ...
     d1,a2,a3,L_tip_total,delta,joint_limits);
@@ -138,27 +129,26 @@ phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_class
 send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
 
 plot_scene_gates(current_q, gates, d1,a2,a3,L_tip_total,delta, GRID_UNIT, ROBOT_GX, ROBOT_GY);
-pause(2); % Wait to reach home physically
+pause(2);
 
-%% 6. PICK UP THE STICK
+%% 6. Stick Collection
 try
     sx = stick_start(1);
     sy = stick_start(2);
     [swx, swy, ~]  = grid_to_world(sx, sy, 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
 
-    hover_z = 0.09;  % Approach height above the stick
-    grip_z  = 0.05;  % Exact height to close gripper around the head
+    hover_z = 0.09;
+    grip_z  = 0.05;
     lift_height = 0.03;
-    z_pass_initial  = grip_z + lift_height;  % 0.085m, travel height after lifting
-
-    pick_pitch = -pi/2; % Pointing straight down to pick up
+    z_pass_initial  = grip_z + lift_height;
+    pick_pitch = -pi/3;
 
     fprintf('Picking up the stick at Grid(%d,%d)\n', sx, sy);
 
     waypoints_pick = [
-        swx, swy, hover_z, pick_pitch, 0;  % Hover above stick
-        swx, swy, grip_z,  pick_pitch, 1;  % Lower to grip height (z=0.06) and close gripper
-        swx, swy, z_pass_initial,  pick_pitch, 2;  % Lift stick up by 25mm to z=0.085
+        swx, swy, hover_z, pick_pitch, 0;
+        swx, swy, grip_z,  pick_pitch, 1;
+        swx, swy, z_pass_initial,  pick_pitch, 2;
         ];
 
     for wp_idx = 1:size(waypoints_pick, 1)
@@ -169,7 +159,7 @@ try
         current_pos         = forward_kinematics(current_q, d1,a2,a3,L_tip_total,delta);
         current_pitch_val   = current_q(2) + delta + current_q(3) + current_q(4);
 
-        num_steps = 15;
+        num_steps = 10;
         traj_x     = linspace(current_pos(1), goal_x,     num_steps);
         traj_y     = linspace(current_pos(2), goal_y,     num_steps);
         traj_z     = linspace(current_pos(3), goal_z,     num_steps);
@@ -188,18 +178,17 @@ try
                         current_gripper = GRIPPER_CLOSE;
                         phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, true);
                         send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
-                        pause(0.5); % Wait for grip
+                        pause(0.5);
                     end
                 end
 
                 phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, current_gripper == GRIPPER_CLOSE);
                 send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
 
-                % Visual Simulation Sync
                 plot_scene_gates(current_q, gates, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
                 drawnow;
 
-                pause(0.015);
+                pause(0.010);
             else
                 warning('Trajectory point unreachable during Pick sequence!');
             end
@@ -209,53 +198,49 @@ catch ME
     fprintf('Program interrupted during pick: %s\n', ME.message);
 end
 
-%% 7. MAIN GATE PASSAGE LOOP
+%% 7. Gate Traversal
 try
     for i = 1:size(gates, 1)
 
         g_x = gates{i, 1};
         g_y = gates{i, 2};
         g_ori = gates{i, 3};
-        g_z_pass = gates{i, 4}; % NEW: read dynamic passing height from input matrix
+        g_z_pass = gates{i, 4};
 
         [wx, wy, ~]  = grid_to_world(g_x, g_y, 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
 
-        % We use the dynamic g_z_pass to keep the stick at an elevated clearance.
-        % Determine approach and exit offsets based on orientation
-        pass_dist = 0.05; % distance to start before gate and end after gate (e.g. 5cm)
+        pass_dist = 0.025;
         if strcmpi(g_ori, 'x')
-            % Pass along real world X axis (moving along Robot base Y)
             wpt_pre_x = wx; wpt_pre_y = wy + pass_dist;
             wpt_post_x = wx; wpt_post_y = wy - pass_dist;
         elseif strcmpi(g_ori, 'y')
-            % Pass along real world Y axis (moving along Robot base X)
             wpt_pre_x = wx - pass_dist; wpt_pre_y = wy;
             wpt_post_x = wx + pass_dist; wpt_post_y = wy;
         end
 
         fprintf('Passing Gate %d at Grid(%d,%d) at height %.3fm\n', i, g_x, g_y, g_z_pass);
-
-        % We keep the pitch securely at pick_pitch (-pi/2) entirely so
-        % the stick hangs straight down and we simply translate through the gate.
         best_pitch = pick_pitch;
 
-        % Waypoints: [x, y, z, pitch]
         if i == 1
-            % For the first gate, move from the pick location to the pre-gate position
             waypoints = [
-                wpt_pre_x,  wpt_pre_y,  g_z_pass, best_pitch; % start before gate
-                wx,         wy,         g_z_pass, best_pitch; % drive through center
-                wpt_post_x, wpt_post_y, g_z_pass, best_pitch; % exit on other side
+                wpt_pre_x,  wpt_pre_y,  g_z_pass, best_pitch;
+                wx,         wy,         g_z_pass, best_pitch;
+                wpt_post_x, wpt_post_y, g_z_pass, best_pitch;
                 ];
         else
-            % For subsequent gates, go straight from the previous exit to the current entrance
-            % The transition in Z (height) happens smoothly during this segment
+            % For subsequent gates: First align X, then adjust Z if needed, then align Y to enter.
             waypoints = [
-                wpt_pre_x,  wpt_pre_y,  g_z_pass, best_pitch; % Move diagonally straight to next gate entrance, adjusting height
-                wx,         wy,         g_z_pass, best_pitch; % drive through center
-                wpt_post_x, wpt_post_y, g_z_pass, best_pitch; % exit on other side
+                wpt_pre_x,  prev_wpt_post_y, prev_z_pass, best_pitch;
+                wpt_pre_x,  prev_wpt_post_y, g_z_pass,    best_pitch;
+                wpt_pre_x,  wpt_pre_y,       g_z_pass,    best_pitch;
+                wx,         wy,              g_z_pass,    best_pitch;
+                wpt_post_x, wpt_post_y,      g_z_pass,    best_pitch;
                 ];
         end
+
+        % Store this gate's post information for the next gate's transition
+        prev_wpt_post_y = wpt_post_y;
+        prev_z_pass = g_z_pass;
 
         for wp_idx = 1:size(waypoints, 1)
             target    = waypoints(wp_idx, :);
@@ -265,9 +250,9 @@ try
             current_pos         = forward_kinematics(current_q, d1,a2,a3,L_tip_total,delta);
             current_pitch_val   = current_q(2) + delta + current_q(3) + current_q(4);
 
-            % Calculate distance to determining number of steps for constant speed straight lines
+            % Path interpolation
             dist = sqrt((goal_x - current_pos(1))^2 + (goal_y - current_pos(2))^2 + (goal_z - current_pos(3))^2);
-            num_steps = max(15, round(dist * 300)); % roughly 300 steps per meter
+            num_steps = max(10, round(dist * 120));
 
             traj_x     = linspace(current_pos(1), goal_x,     num_steps);
             traj_y     = linspace(current_pos(2), goal_y,     num_steps);
@@ -285,11 +270,10 @@ try
                     phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, false);
                     send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
 
-                    % Visual Simulation Sync
                     plot_scene_gates(current_q, gates, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
                     drawnow;
 
-                    pause(0.015);
+                    pause(0.010);
                 else
                     warning('Trajectory point unreachable for Gate %d!', i);
                 end
@@ -315,15 +299,14 @@ catch ME
     fprintf('Program interrupted during gates: %s\n', ME.message);
 end
 
-%% 8. DROP OFF THE STICK
+%% 8. Stick Placement
 try
     sx = stick_start(1);
     sy = stick_start(2);
     [swx, swy, ~]  = grid_to_world(sx, sy, 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
 
-    % Use the exact same heights from the pick-up sequence
-    hover_z = 0.09;  % Approach/retreat safety height
-    grip_z  = 0.05;  % Exact height to release gripper around the head
+    hover_z = 0.09;
+    grip_z  = 0.05;
 
     % If gates were passed, z_pass is whatever the last gate's height was.
     % Otherwise fallback to initial pick lifting height.
@@ -337,9 +320,9 @@ try
     fprintf('Dropping off the stick back at Grid(%d,%d)\n', sx, sy);
 
     waypoints_drop = [
-        swx, swy, z_pass_final,  pick_pitch, 0;  % Translate back to holder at travel height
-        swx, swy, grip_z,        pick_pitch, 1;  % Lower to original grip height
-        swx, swy, hover_z,       pick_pitch, 2;  % Lift gripper away after opening
+        swx, swy, z_pass_final,  pick_pitch, 0;
+        swx, swy, grip_z,        pick_pitch, 1;
+        swx, swy, hover_z,       pick_pitch, 2;
         ];
 
     for wp_idx = 1:size(waypoints_drop, 1)
@@ -350,7 +333,7 @@ try
         current_pos         = forward_kinematics(current_q, d1,a2,a3,L_tip_total,delta);
         current_pitch_val   = current_q(2) + delta + current_q(3) + current_q(4);
 
-        num_steps = 15;
+        num_steps = 10;
         traj_x     = linspace(current_pos(1), goal_x,     num_steps);
         traj_y     = linspace(current_pos(2), goal_y,     num_steps);
         traj_z     = linspace(current_pos(3), goal_z,     num_steps);
@@ -380,7 +363,7 @@ try
                 plot_scene_gates(current_q, gates, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
                 drawnow;
 
-                pause(0.015);
+                pause(0.010);
             else
                 warning('Trajectory point unreachable during Drop sequence!');
             end
@@ -390,7 +373,7 @@ catch ME
     fprintf('Program interrupted during drop off: %s\n', ME.message);
 end
 
-%% 9. END POSITION
+%% 9. Recovery Position
 end_x = 0.175; end_y = 0; end_z = 0.15; end_pitch = 0;
 [q1,q2,q3,q4,valid] = inverse_kinematics(end_x,end_y,end_z,end_pitch, ...
     d1,a2,a3,L_tip_total,delta,joint_limits);
@@ -403,14 +386,13 @@ if valid
     pause(2);
 end
 
-%% 10. CLEANUP
-fprintf('\n--- Shutting Down ---\n');
+%% 10. Shutdown
+fprintf('Shutting down...\n');
 for k = 1:length(IDs)
     write1ByteTxRx(port_num, PROTOCOL_VERSION, IDs(k), ADDR_PRO_TORQUE_ENABLE, TORQUE_DISABLE);
 end
 fprintf('Torque DISABLED.\n');
 closePort(port_num);
-fprintf('Port Closed.\n');
 unloadlibrary(lib_name);
 
 
@@ -419,14 +401,10 @@ unloadlibrary(lib_name);
 function phys_angles = sim_to_phys_angles(sim_q, gripper_q, delta, offset_classmate, is_placing)
 global MOTOR_11_OFFSET;
 if is_placing
-    % 判断映射到真实物理角度的方向
-    % physical_q1 = sim_q(1) + pi
-    % 如果 sim_q(1) > 0，则真实角度 > 180度（在 180~360 区间）
     if sim_q(1) > 0
         q1 = sim_q(1) - MOTOR_11_OFFSET;
     else
-        % 在 0~180 区间
-        q1 = sim_q(1); %+ MOTOR_11_OFFSET;
+        q1 = sim_q(1);
     end
 else
     q1 = sim_q(1);
@@ -465,7 +443,7 @@ axis([-0.3 0.4 -0.4 0.4 0 0.6]);
 view(45, 30);
 xlabel('X'); ylabel('Y'); zlabel('Z');
 
-% Plot gates as simple 3D arches
+% Plot gates
 for k = 1:size(gates, 1)
     [gx, gy, ~] = grid_to_world(gates{k,1}, gates{k,2}, 0, unit, rx, ry);
 

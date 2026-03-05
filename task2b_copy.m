@@ -69,7 +69,7 @@ fprintf('Torque, Acceleration & Velocity Profiles ENABLED (Gripper boosted).\n')
 %% 2. GRIPPER SETTINGS (Adjust as needed)
 % Define the offset in radians from 180 degrees (0 in IK frame means 180 in physical)
 GRIPPER_OPEN  = deg2rad(-55); % Open position
-GRIPPER_CLOSE = deg2rad(5);  % Tightened: Increased from 0 to 40 to grip harder
+GRIPPER_CLOSE = deg2rad(10);  % Tightened: Increased from 0 to 40 to grip harder
 current_gripper = GRIPPER_OPEN;
 
 %% 3. GRID & SCENE CONFIGURATION
@@ -182,13 +182,12 @@ try
         % Waypoints: [x, y, z, pitch, action]
         % action: 0=Stay Open, 1=Close (Pick), 2=Stay Closed, 3=Open (Place)
         under_bridge = (i == 1);   % cube 1 special-case
-        if i==2
-            [hx_place,hy_place ]=  radial_offset(hx, hy, -0.003)
+        travel_z = home_z;     % "home height" travel
+        travel_pitch = 0;      % 0 degree pitch
 
-        else
-            hx_place = hx+0.001;
-            hy_place = hy;
-        end
+        hx_place = hx+0.001;
+        hy_place = hy;
+    
 
         if under_bridge
             pick_pitch = -pi/6;        % parallel to table (horizontal)
@@ -216,6 +215,7 @@ try
             retreat_x = entry_x-0.1;   % or exit_x, depending how far you want to retreat
             retreat_y = entry_y;   % keep same y if you want straight back
             retreat_z = cz_pick;  % stay low while retreating
+            
 
             waypoints = [
                 exit_x,  exit_y,  SAFE_Z_ABOVE, pick_pitch, 0;
@@ -223,14 +223,14 @@ try
                 entry_x, entry_y, z_corridor,   pick_pitch, 0;
 
                 gx,      gy,      z_corridor,       pick_pitch, 0; % slide IN corridor
-                gx,      gy,      cz_pick-0.002,      pick_pitch, 0; % down
-                gx,      gy,      cz_pick-0.002,      pick_pitch, 1; % CLOSE (arm still)
+                gx,      gy,      cz_pick,      pick_pitch, 0; % down
+                gx,      gy,      cz_pick,      pick_pitch, 1; % CLOSE (arm still)
 
                 exit_x,  exit_y,  z_corridor+0.01,   pick_pitch, 2;
                 exit_x,  exit_y,  SAFE_Z_ABOVE,      pick_pitch, 2;
                 hx,      hy,      cz_place+hover_z,  pick_pitch, 2;
-                hx+0.002,      hy-0.006,      cz_place+0.02,     pick_pitch-(pi/2), 2;
-                hx+0.002,      hy-0.006,      cz_place+0.01,     pick_pitch-(pi/2), 3;
+                hx+0.003,      hy-0.007,      cz_place+0.02,     pick_pitch-(pi/2), 2;
+                hx+0.003,      hy-0.007,      cz_place+0.01,     pick_pitch-(pi/2), 3;
                 hx_place,      hy_place,      cz_place+hover_z,  best_pitch, 0;
                 hx_place, hy_place, cz_place + hover_z, best_pitch, 0;   % Retract
             

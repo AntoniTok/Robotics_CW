@@ -1,3 +1,4 @@
+
 %task2b_stack.m
 % Merges Task 2a Simulation (path planning) with Real Robot Control
 
@@ -82,7 +83,7 @@ ROBOT_GY  = 3;
 target_cubes = [
     9,  12,  1;
     16,  10,  2;
-    17, 7, 3
+    17, 6, 3
     ];
 cubes_start = target_cubes;
 
@@ -111,8 +112,8 @@ shift_q2 = offset_classmate - delta;
 shift_q3 = -offset_classmate;
 joint_limits = [
     deg2rad(-180), deg2rad(180);
-    deg2rad(-90)  + shift_q2,  deg2rad(90) + shift_q2;
-    deg2rad(-75)  + shift_q3,  deg2rad(85) + shift_q3;
+    deg2rad(-90)  + shift_q2,  deg2rad(100) + shift_q2;
+    deg2rad(-75)  + shift_q3,  deg2rad(105) + shift_q3;
     deg2rad(-135),             deg2rad(135)
     ];
 
@@ -156,6 +157,12 @@ try
         fprintf('Moving Cube %d: Grid(%d,%d) -> Grid(%d,%d)\n', ...
             i, cubes_start(i,1), cubes_start(i,2), holders(i,1), holders(i,2));
 
+        if i == 2
+            rotate_cube_in_place(2, cubes_start(i,1), cubes_start(i,2), port_num, PROTOCOL_VERSION, IDs);
+        elseif i == 3
+            rotate_cube_in_place(1, cubes_start(i,1), cubes_start(i,2), port_num, PROTOCOL_VERSION, IDs);
+        end
+        
         % Pitch selection
         best_pitch  = -pi/2;
         test_angles = deg2rad(-90 : 5 : 90);
@@ -175,6 +182,13 @@ try
         % Waypoints: [x, y, z, pitch, action]
         % action: 0=Stay Open, 1=Close (Pick), 2=Stay Closed, 3=Open (Place)
         under_bridge = (i == 1);   % cube 1 special-case
+        if i==2
+            [hx_place,hy_place ]=  radial_offset(hx, hy, -0.003)
+
+        else
+            hx_place = hx+0.001;
+            hy_place = hy;
+        end
 
         if under_bridge
             pick_pitch = -pi/6;        % parallel to table (horizontal)
@@ -205,30 +219,38 @@ try
 
             waypoints = [
                 exit_x,  exit_y,  SAFE_Z_ABOVE, pick_pitch, 0;
-                exit_x,  exit_y,  z_corridor,   pick_pitch, 0;
+
                 entry_x, entry_y, z_corridor,   pick_pitch, 0;
 
                 gx,      gy,      z_corridor,       pick_pitch, 0; % slide IN corridor
-                gx,      gy,      cz_pick-0.006,      pick_pitch, 0; % down
-                gx,      gy,      cz_pick-0.006,      pick_pitch, 1; % CLOSE (arm still)
+                gx,      gy,      cz_pick-0.002,      pick_pitch, 0; % down
+                gx,      gy,      cz_pick-0.002,      pick_pitch, 1; % CLOSE (arm still)
 
                 exit_x,  exit_y,  z_corridor+0.01,   pick_pitch, 2;
                 exit_x,  exit_y,  SAFE_Z_ABOVE,      pick_pitch, 2;
                 hx,      hy,      cz_place+hover_z,  pick_pitch, 2;
-                hx,      hy,      cz_place,     pick_pitch, 3;
-                hx,      hy,      cz_place+hover_z,  best_pitch, 0;
+                hx+0.002,      hy-0.006,      cz_place+0.02,     pick_pitch-(pi/2), 2;
+                hx+0.002,      hy-0.006,      cz_place+0.01,     pick_pitch-(pi/2), 3;
+                hx_place,      hy_place,      cz_place+hover_z,  best_pitch, 0;
+                hx_place, hy_place, cz_place + hover_z, best_pitch, 0;   % Retract
+            
+                hx_place, hy_place, travel_z,           travel_pitch, 0; % Lift + rotate wrist safely
+                home_x, home_y, travel_z,   travel_pitch, 0; % Travel to home "corridor"
 
             ];
         else
 
             % your normal top-down waypoints
             waypoints = [
-                cx, cy, cz_pick  + hover_z, best_pitch, 0;
-                cx, cy, cz_pick,            best_pitch, 1;
-                cx, cy, cz_pick  + hover_z, best_pitch, 2;
-                hx, hy, cz_place + hover_z, best_pitch, 2;
-                hx, hy, cz_place,           best_pitch, 3;
-                hx, hy, cz_place + hover_z, best_pitch, 0;
+                cx, cy, cz_pick  + hover_z, best_pitch, 0;   % Approach pick
+                cx, cy, cz_pick,            best_pitch, 1;   % Pick
+                cx, cy, cz_pick  + hover_z, best_pitch, 2;   % Lift
+                hx_place, hy_place, cz_place + hover_z, best_pitch, 2;   % Approach place
+                hx_place, hy_place, cz_place,           best_pitch, 3;   % Place
+                hx_place, hy_place, cz_place + hover_z, best_pitch, 0;   % Retract
+            
+                hx_place, hy_place, travel_z,           travel_pitch, 0; % Lift + rotate wrist safely
+                home_x, home_y, travel_z,   travel_pitch, 0; % Travel to home "corridor"
             ];
         end
 
@@ -273,6 +295,8 @@ try
                             phys_angles = sim_to_phys_angles(last_valid_q, current_gripper, delta, offset_classmate, false);
                             send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
                             pause(0.3);
+                        
+                            % ---- Rotate cube 1 once AFTER placing it ----
                         end
                     end
 
@@ -439,6 +463,8 @@ beta   = acos(cos_b);
 angle_link2 = alpha + beta;
 theta2      = angle_link2 - delta;
 theta4      = phi - (angle_link2 + theta3);
+fprintf("theta2=%.1f deg, lim=[%.1f, %.1f]\n", rad2deg(theta2), rad2deg(limits(2,1)), rad2deg(limits(2,2)));
+fprintf("theta3=%.1f deg, lim=[%.1f, %.1f]\n", rad2deg(theta3), rad2deg(limits(3,1)), rad2deg(limits(3,2)));
 
 if  ~isempty(limits)
     if theta1 < limits(1,1) || theta1 > limits(1,2)
@@ -449,7 +475,6 @@ if  ~isempty(limits)
         disp("limit fail: theta3"); isValid = false;
     elseif theta4 < limits(4,1) || theta4 > limits(4,2)
         disp("limit fail: theta4"); isValid = false;
-    end
     end
 end
 end
@@ -479,6 +504,14 @@ T = [cos(theta), -sin(theta)*cos(alpha),  sin(theta)*sin(alpha), a*cos(theta);
     0,           sin(alpha),             cos(alpha),            d;
     0,           0,                      0,                     1];
 end
+function [ox, oy] = radial_offset(x, y, dist)
+% Offsets point (x,y) by dist meters radially outward from robot origin (0,0)
+    theta = atan2(y, x);
+    r = sqrt(x^2 + y^2) + dist;
+    ox = r * cos(theta);
+    oy = r * sin(theta);
+end
+
 
 function plot_frame(T, s)
 p = T(1:3,4); R = T(1:3,1:3);

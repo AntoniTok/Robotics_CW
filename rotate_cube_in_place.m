@@ -8,7 +8,6 @@ function rotate_cube_in_place(k, cube_gx, cube_gy, port_num, PROTOCOL_VERSION, I
 %   The cube stays in the same (gx, gy) position. Repeated k times.
 %
 %   Fixes vs original:
-%     1. cur_cx/cur_cy tracks where the cube actually is after each place.
 %     2. After releasing, arm rises to a safe hover above the (new) cube
 %        position before starting the next iteration, preventing accidental
 %        nudges at low height.
@@ -82,7 +81,7 @@ end
 
 %% ---- Rotation loop ----
 current_gripper = GRIPPER_OPEN;
-current_q = ik_or_die(cur_cx, cur_cy, pick_z + hover_z, pitch_pick, ...
+current_q = ik_or_die(cx, cy, pick_z + hover_z, pitch_pick, ...
                        d1,a2,a3,L_tip_total,delta,joint_limits);
 
 % Move to starting hover position

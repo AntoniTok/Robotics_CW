@@ -81,9 +81,6 @@ if isempty(pitch_place)
 end
 
 %% ---- Rotation loop ----
-% cur_cx/cur_cy track where the cube actually is after each place.
-cur_cx = cx;
-cur_cy = cy;
 current_gripper = GRIPPER_OPEN;
 current_q = ik_or_die(cur_cx, cur_cy, pick_z + hover_z, pitch_pick, ...
                        d1,a2,a3,L_tip_total,delta,joint_limits);
@@ -96,13 +93,13 @@ for iter = 1:k
     fprintf('--- Rotation %d / %d ---\n', iter, k);
 
     % Offset place position radially outward from robot
-    [ox, oy] = radial_offset(cur_cx, cur_cy, 0.02);
+    [ox, oy] = radial_offset(cx, cy, 0.02);
 
     waypoints = [
-        cur_cx, cur_cy, pick_z + hover_z,  pitch_pick,  0;   % 1 hover above (vertical)
-        cur_cx, cur_cy, pick_z,            pitch_pick,  1;   % 2 descend & grip
-        cur_cx, cur_cy, pick_z + rotate_z, pitch_pick,  0;   % 3 lift high
-        cur_cx, cur_cy, pick_z + rotate_z, pitch_place, 0;   % 4 rotate wrist
+        cx, cy, pick_z + hover_z,  pitch_pick,  0;   % 1 hover above (vertical)
+        cx, cy, pick_z,            pitch_pick,  1;   % 2 descend & grip
+        cx, cy, pick_z + rotate_z, pitch_pick,  0;   % 3 lift high
+        cx, cy, pick_z + rotate_z, pitch_place, 0;   % 4 rotate wrist
         ox,     oy,     place_z + hover_z, pitch_place, 0;   % 5 move outward + lower
         ox,     oy,     place_z,           pitch_place, 2;   % 6 descend & release
         ox,     oy,     place_z + hover_z, pitch_place, 0;   % 7 retract up
@@ -144,11 +141,7 @@ for iter = 1:k
         end
     end
 
-    % Cube is now at (ox, oy) — update tracked position for next iteration
-    cur_cx = ox;
-    cur_cy = oy;
-
-    fprintf('  Rotation %d complete. Cube now at world (%.4f, %.4f)\n', iter, cur_cx, cur_cy);
+    fprintf('  Rotation %d complete.\n', iter);
 end
 
 fprintf('All %d rotation(s) done.\n', k);

@@ -37,7 +37,7 @@ ROBOT_GY    = 3;
 cube_height = 0.025;
 pick_z      = cube_height/2 + 0.018;
 place_z     = cube_height/2 + 0.030;
-hover_z     = 0.04;
+hover_z     = 0.06;
 rotate_z    = 0.10;
 safe_z      = 0.15;   % height used for inter-iteration safe hover
 
@@ -92,7 +92,7 @@ for iter = 1:k
     fprintf('--- Rotation %d / %d ---\n', iter, k);
 
     % Offset place position radially outward from robot
-    [ox, oy] = radial_offset(cx, cy, 0.02);
+    [ox, oy] = radial_offset(cx, cy, 0.018);
 
     waypoints = [
         cx, cy, pick_z + hover_z,  pitch_pick,  0;   % 1 hover above (vertical)
@@ -100,6 +100,7 @@ for iter = 1:k
         cx, cy, pick_z + rotate_z, pitch_pick,  0;   % 3 lift high
         cx, cy, pick_z + rotate_z, pitch_place, 0;   % 4 rotate wrist
         ox,     oy,     place_z + hover_z, pitch_place, 0;   % 5 move outward + lower
+        ox,     oy,     place_z,           pitch_place, 0;   % 5 move outward + lower
         ox,     oy,     place_z,           pitch_place, 2;   % 6 descend & release
         ox,     oy,     place_z + hover_z, pitch_place, 0;   % 7 retract up
         ox,     oy,     safe_z,            pitch_place, 0;   % 8 rise to safe height

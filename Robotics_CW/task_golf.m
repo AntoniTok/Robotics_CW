@@ -1,10 +1,11 @@
-% task2c.m
-% Final gate traversal script for Robotics course work
+% task_golf.m
+% Script for robot arm to pick up a golf club and hit a ball
+% Requires pre-defined grid functions and kinematic functions from previous tasks
 
 clear; clc; close all;
 
 %% 1. Initialization
-fprintf('Starting robot control...\n');
+fprintf('Starting robot control for Golf...\n');
 lib_name = '';
 if strcmp(computer, 'PCWIN'),       lib_name = 'dxl_x86_c';
 elseif strcmp(computer, 'PCWIN64'), lib_name = 'dxl_x64_c';
@@ -35,8 +36,10 @@ DEVICENAME = 'COM7';
 TORQUE_ENABLE  = 1;
 TORQUE_DISABLE = 0;
 SAFE_PROFILE_VEL   = 150;
+SWING_PROFILE_VEL  = 400; % Much faster velocity for hitting
 GRIPPER_PROFILE_VEL = 200;
 SAFE_PROFILE_ACCEL = 30;
+SWING_PROFILE_ACCEL = 100; % Faster acceleration for hitting
 global MOTOR_11_OFFSET;
 MOTOR_11_OFFSET    = deg2rad(1);
 
@@ -76,18 +79,9 @@ GRID_H    = 12;
 ROBOT_GX  = 9;
 ROBOT_GY  = 3;
 
-% Gate definitions: {gx, gy, orientation, height}
-gates = {
-    5, 7, 'y', 0.075;
-    7, 10, 'x', 0.095;
-    11, 12, 'x', 0.095;
-    14, 7, 'x', 0.075;
-    };
-
-stick_start = [17.1, 0.9];
-target_cubes = [];
-cubes_start = [];
-holders = [];
+% Customizable target locations
+club_start = [17.1, 0.9]; % Grid position of the golf club
+ball_pos   = [9, 12]; % Target ball grid position
 
 %% 4. Robot Kinematic Parameters
 d1 = 0.077;
@@ -108,10 +102,10 @@ joint_limits = [
     deg2rad(-140),             deg2rad(140)
     ];
 
-fig = figure('Name','Task 2c: Passing Through Gates','Color','w','Position',[100 100 1200 800]);
+fig = figure('Name','Task Golf','Color','w','Position',[100 100 1200 800]);
 view(45, 30); axis equal; grid on; hold on;
 xlabel('World X (m)'); ylabel('World Y (m)'); zlabel('World Z (m)');
-axis([-0.3 0.4 -0.4 0.4 0 0.6]);
+axis([-0.4 0.4 -0.4 0.4 0 0.6]);
 
 %% 5. Home Positioning
 home_x = 0.25; home_y = 0; home_z = 0.20; home_pitch = 0;
@@ -128,27 +122,27 @@ current_q = [q1, q2, q3, q4];
 phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, false);
 send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
 
-plot_scene_gates(current_q, gates, d1,a2,a3,L_tip_total,delta, GRID_UNIT, ROBOT_GX, ROBOT_GY);
+plot_scene_golf(current_q, club_start, ball_pos, d1,a2,a3,L_tip_total,delta, GRID_UNIT, ROBOT_GX, ROBOT_GY);
 pause(2);
 
-%% 6. Stick Collection
+%% 6. Club Collection
 try
-    sx = stick_start(1);
-    sy = stick_start(2);
-    [swx, swy, ~]  = grid_to_world(sx, sy, 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
+    cx = club_start(1);
+    cy = club_start(2);
+    [cwx, cwy, ~]  = grid_to_world(cx, cy, 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
 
     hover_z = 0.09;
     grip_z  = 0.05;
-    lift_height = 0.03;
+    lift_height = 0.10; % Lift higher to clear ground with club
     z_pass_initial  = grip_z + lift_height;
-    pick_pitch = -pi/3;
+    pick_pitch = -pi/2; % Hanging straight down
 
-    fprintf('Picking up the stick at Grid(%d,%d)\n', sx, sy);
+    fprintf('Picking up the golf club at Grid(%d,%d)\n', cx, cy);
 
     waypoints_pick = [
-        swx, swy, hover_z, pick_pitch, 0;
-        swx, swy, grip_z,  pick_pitch, 1;
-        swx, swy, z_pass_initial,  pick_pitch, 2;
+        cwx, cwy, hover_z, pick_pitch, 0;
+        cwx, cwy, grip_z,  pick_pitch, 1;
+        cwx, cwy, z_pass_initial,  pick_pitch, 2;
         ];
 
     for wp_idx = 1:size(waypoints_pick, 1)
@@ -159,7 +153,7 @@ try
         current_pos         = forward_kinematics(current_q, d1,a2,a3,L_tip_total,delta);
         current_pitch_val   = current_q(2) + delta + current_q(3) + current_q(4);
 
-        num_steps = 10;
+        num_steps = 15;
         traj_x     = linspace(current_pos(1), goal_x,     num_steps);
         traj_y     = linspace(current_pos(2), goal_y,     num_steps);
         traj_z     = linspace(current_pos(3), goal_z,     num_steps);
@@ -185,195 +179,165 @@ try
                 phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, current_gripper == GRIPPER_CLOSE);
                 send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
 
-                plot_scene_gates(current_q, gates, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
+                plot_scene_golf(current_q, club_start, ball_pos, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
                 drawnow;
-
                 pause(0.010);
             else
                 warning('Trajectory point unreachable during Pick sequence!');
             end
         end
     end
+
+    % --- UPDATE FINGER LENGTH ---
+    fprintf('Club picked up. Increasing finger length (L_tip_total) by 50mm.\n');
+    L_tip_total = L_tip_total + 0.050; % Add 50mm to account for club length
+
 catch ME
     fprintf('Program interrupted during pick: %s\n', ME.message);
 end
 
-%% 7. Gate Traversal
+%% 7. Full Golf Swing (Backswing, Fast Hit, Follow-through)
 try
-    for i = 1:size(gates, 1)
+    bx = ball_pos(1);
+    by = ball_pos(2);
+    [bwx, bwy, ~]  = grid_to_world(bx, by, 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
 
-        g_x = gates{i, 1};
-        g_y = gates{i, 2};
-        g_ori = gates{i, 3};
-        g_z_pass = gates{i, 4};
+    r_hit = sqrt(bwx^2 + bwy^2);
+    theta_ball = atan2(bwy, bwx);
+    hit_z = 0.015;
+    hit_pitch = -pi/4; % 摆出45度击球
 
-        [wx, wy, ~]  = grid_to_world(g_x, g_y, 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
+    % Fast impact zone: +/- 50mm around ball. 0.05 / radius = angular spread
+    delta_theta = atan2(0.05, r_hit);
+    theta_pre  = theta_ball + delta_theta;
+    theta_post = theta_ball - delta_theta;
 
-        pass_dist = 0.025;
-        if strcmpi(g_ori, 'x')
-            wpt_pre_x = wx; wpt_pre_y = wy + pass_dist;
-            wpt_post_x = wx; wpt_post_y = wy - pass_dist;
-        elseif strcmpi(g_ori, 'y')
-            wpt_pre_x = wx - pass_dist; wpt_pre_y = wy;
-            wpt_post_x = wx + pass_dist; wpt_post_y = wy;
-        end
+    % Backswing peak (起杆顶点，位于轨迹左侧高处)
+    theta_back = theta_ball + deg2rad(90);
+    r_back = r_hit - 0.06; % 贴近身体
+    z_back = 0.15; % 高高举起
+    pitch_back = -pi/8;
 
-        fprintf('Passing Gate %d at Grid(%d,%d) at height %.3fm\n', i, g_x, g_y, g_z_pass);
-        best_pitch = pick_pitch;
+    % Follow-through peak (收杆顶点，位于轨迹右侧高处)
+    theta_fwd = theta_ball - deg2rad(90);
+    r_fwd = r_hit - 0.06;
+    z_fwd = 0.15;
+    pitch_fwd = -pi/8;
 
-        if i == 1
-            waypoints = [
-                wpt_pre_x,  wpt_pre_y,  g_z_pass, best_pitch;
-                wx,         wy,         g_z_pass, best_pitch;
-                wpt_post_x, wpt_post_y, g_z_pass, best_pitch;
-                ];
-        else
-            % For subsequent gates: First align X, then adjust Z if needed, then align Y to enter.
-            waypoints = [
-                wpt_pre_x,  prev_wpt_post_y, prev_z_pass, best_pitch;
-                wpt_pre_x,  prev_wpt_post_y, g_z_pass,    best_pitch;
-                wpt_pre_x,  wpt_pre_y,       g_z_pass,    best_pitch;
-                wx,         wy,              g_z_pass,    best_pitch;
-                wpt_post_x, wpt_post_y,      g_z_pass,    best_pitch;
-                ];
-        end
+    % --- Phase 1: Move to Backswing Peak ---
+    fprintf('Phase 1: Lifting and moving to Backswing Peak (起杆)...\n');
+    current_pos       = forward_kinematics(current_q, d1,a2,a3,L_tip_total,delta);
+    current_pitch_val = current_q(2) + delta + current_q(3) + current_q(4);
 
-        % Store this gate's post information for the next gate's transition
-        prev_wpt_post_y = wpt_post_y;
-        prev_z_pass = g_z_pass;
-
-        for wp_idx = 1:size(waypoints, 1)
-            target    = waypoints(wp_idx, :);
-            goal_x    = target(1); goal_y = target(2); goal_z = target(3);
-            goal_pitch = target(4);
-
-            current_pos         = forward_kinematics(current_q, d1,a2,a3,L_tip_total,delta);
-            current_pitch_val   = current_q(2) + delta + current_q(3) + current_q(4);
-
-            % Path interpolation
-            dist = sqrt((goal_x - current_pos(1))^2 + (goal_y - current_pos(2))^2 + (goal_z - current_pos(3))^2);
-            num_steps = max(10, round(dist * 120));
-
-            traj_x     = linspace(current_pos(1), goal_x,     num_steps);
-            traj_y     = linspace(current_pos(2), goal_y,     num_steps);
-            traj_z     = linspace(current_pos(3), goal_z,     num_steps);
-            traj_pitch = linspace(current_pitch_val, goal_pitch, num_steps);
-
-            for t = 1:num_steps
-                [q1_t,q2_t,q3_t,q4_t,valid_t] = inverse_kinematics( ...
-                    traj_x(t), traj_y(t), traj_z(t), traj_pitch(t), ...
-                    d1,a2,a3,L_tip_total,delta,joint_limits);
-
-                if valid_t
-                    current_q = [q1_t, q2_t, q3_t, q4_t];
-
-                    phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, false);
-                    send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
-
-                    plot_scene_gates(current_q, gates, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
-                    drawnow;
-
-                    pause(0.010);
-                else
-                    warning('Trajectory point unreachable for Gate %d!', i);
-                end
-            end
-        end
-
-    end
-
-    % Lift up after gate passage is fully complete
-    current_pos = forward_kinematics(current_q, d1,a2,a3,L_tip_total,delta);
+    % Safe lift first
+    safe_z = 0.25;
     [q1_t,q2_t,q3_t,q4_t,valid_t] = inverse_kinematics( ...
-        current_pos(1), current_pos(2), current_pos(3) + 0.08, 0, ...
+        current_pos(1), current_pos(2), safe_z, current_pitch_val, ...
         d1,a2,a3,L_tip_total,delta,joint_limits);
     if valid_t
         current_q = [q1_t, q2_t, q3_t, q4_t];
-        phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, false);
+        phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, current_gripper == GRIPPER_CLOSE);
         send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
-        plot_scene_gates(current_q, gates, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
-        pause(1.0);
+        plot_scene_golf(current_q, club_start, ball_pos, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
+        pause(0.5);
     end
 
-catch ME
-    fprintf('Program interrupted during gates: %s\n', ME.message);
-end
+    % Sweep to the peak point
+    num_steps = 25;
+    back_x = r_back * cos(theta_back);
+    back_y = r_back * sin(theta_back);
 
-%% 8. Stick Placement
-try
-    sx = stick_start(1);
-    sy = stick_start(2);
-    [swx, swy, ~]  = grid_to_world(sx, sy, 0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
+    traj_x     = linspace(current_pos(1), back_x, num_steps);
+    traj_y     = linspace(current_pos(2), back_y, num_steps);
+    traj_z     = linspace(safe_z, z_back, num_steps);
+    traj_pitch = linspace(current_pitch_val, pitch_back, num_steps);
 
-    hover_z = 0.09;
-    grip_z  = 0.05;
-
-    % If gates were passed, z_pass is whatever the last gate's height was.
-    % Otherwise fallback to initial pick lifting height.
-    if exist('g_z_pass', 'var')
-        z_pass_final = g_z_pass;
-    else
-        z_pass_final = 0.085;
-    end
-    pick_pitch = -pi/2; % Hanging straight down
-
-    fprintf('Dropping off the stick back at Grid(%d,%d)\n', sx, sy);
-
-    waypoints_drop = [
-        swx, swy, z_pass_final,  pick_pitch, 0;
-        swx, swy, grip_z,        pick_pitch, 1;
-        swx, swy, hover_z,       pick_pitch, 2;
-        ];
-
-    for wp_idx = 1:size(waypoints_drop, 1)
-        target    = waypoints_drop(wp_idx, :);
-        goal_x    = target(1); goal_y = target(2); goal_z = target(3);
-        goal_pitch = target(4); action = target(5);
-
-        current_pos         = forward_kinematics(current_q, d1,a2,a3,L_tip_total,delta);
-        current_pitch_val   = current_q(2) + delta + current_q(3) + current_q(4);
-
-        num_steps = 10;
-        traj_x     = linspace(current_pos(1), goal_x,     num_steps);
-        traj_y     = linspace(current_pos(2), goal_y,     num_steps);
-        traj_z     = linspace(current_pos(3), goal_z,     num_steps);
-        traj_pitch = linspace(current_pitch_val, goal_pitch, num_steps);
-
-        for t = 1:num_steps
-            [q1_t,q2_t,q3_t,q4_t,valid_t] = inverse_kinematics( ...
-                traj_x(t), traj_y(t), traj_z(t), traj_pitch(t), ...
-                d1,a2,a3,L_tip_total,delta,joint_limits);
-
-            if valid_t
-                current_q = [q1_t, q2_t, q3_t, q4_t];
-
-                if t == num_steps
-                    if action == 1 % OPEN GRIPPER AT DROP HEIGHT
-                        current_gripper = GRIPPER_OPEN;
-                        phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, true);
-                        send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
-                        pause(0.5); % Wait for release
-                    end
-                end
-
-                phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, current_gripper == GRIPPER_CLOSE);
-                send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
-
-                % Visual Simulation Sync
-                plot_scene_gates(current_q, gates, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
-                drawnow;
-
-                pause(0.010);
-            else
-                warning('Trajectory point unreachable during Drop sequence!');
-            end
+    for t = 1:num_steps
+        [q1_t,q2_t,q3_t,q4_t,valid_t] = inverse_kinematics( ...
+            traj_x(t), traj_y(t), traj_z(t), traj_pitch(t), ...
+            d1,a2,a3,L_tip_total,delta,joint_limits);
+        if valid_t
+            current_q = [q1_t, q2_t, q3_t, q4_t];
+            phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, current_gripper == GRIPPER_CLOSE);
+            send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
+            plot_scene_golf(current_q, club_start, ball_pos, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
+            drawnow;
+            pause(0.010);
         end
     end
+
+    % --- Phase 2, 3, 4: The Unified FAST Swing ---
+    fprintf('Executing full continuous fast swing (Downswing -> Impact -> Follow-through)...\n');
+
+    % Set fast velocity profile for ALL moving motors
+    for k = 1:4
+        write4ByteTxRx(port_num, PROTOCOL_VERSION, IDs(k), ADDR_PRO_PROFILE_ACCELERATION, SWING_PROFILE_ACCEL);
+        write4ByteTxRx(port_num, PROTOCOL_VERSION, IDs(k), ADDR_PRO_PROFILE_VELOCITY, SWING_PROFILE_VEL);
+    end
+
+    % Trajectory 1: Downswing (Phase 2)
+    num_steps_down = 15;
+    traj_theta_2 = linspace(theta_back, theta_pre, num_steps_down);
+    traj_r_2     = linspace(r_back, r_hit, num_steps_down);
+    traj_z_2     = linspace(z_back, hit_z, num_steps_down);
+    traj_pitch_2 = linspace(pitch_back, hit_pitch, num_steps_down);
+
+    % Trajectory 2: Impact Zone (Phase 3)
+    num_steps_hit = 10;
+    traj_theta_3 = linspace(theta_pre, theta_post, num_steps_hit);
+    traj_r_3     = linspace(r_hit, r_hit, num_steps_hit);
+    traj_z_3     = linspace(hit_z, hit_z, num_steps_hit);
+    traj_pitch_3 = linspace(hit_pitch, hit_pitch, num_steps_hit);
+
+    % Trajectory 3: Follow-through (Phase 4)
+    num_steps_up = 15;
+    traj_theta_4 = linspace(theta_post, theta_fwd, num_steps_up);
+    traj_r_4     = linspace(r_hit, r_fwd, num_steps_up);
+    traj_z_4     = linspace(hit_z, z_fwd, num_steps_up);
+    traj_pitch_4 = linspace(hit_pitch, pitch_fwd, num_steps_up);
+
+    % Combine them
+    full_theta = [traj_theta_2, traj_theta_3(2:end), traj_theta_4(2:end)];
+    full_r     = [traj_r_2,     traj_r_3(2:end),     traj_r_4(2:end)];
+    full_z     = [traj_z_2,     traj_z_3(2:end),     traj_z_4(2:end)];
+    full_pitch = [traj_pitch_2, traj_pitch_3(2:end), traj_pitch_4(2:end)];
+
+    for t = 1:length(full_theta)
+        tx = full_r(t) * cos(full_theta(t));
+        ty = full_r(t) * sin(full_theta(t));
+
+        [q1_t,q2_t,q3_t,q4_t,valid_t] = inverse_kinematics( ...
+            tx, ty, full_z(t), full_pitch(t), ...
+            d1,a2,a3,L_tip_total,delta,joint_limits);
+        if valid_t
+            current_q = [q1_t, q2_t, q3_t, q4_t];
+            phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, current_gripper == GRIPPER_CLOSE);
+            send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
+
+            % Update visual output every other frame to keep physical speed high
+            if mod(t, 2) == 0
+                plot_scene_golf(current_q, club_start, ball_pos, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
+                drawnow;
+            end
+            pause(0.002);
+        end
+    end
+
+    pause(0.5);
+
+    % Restore safe velocity profile for all motors
+    for k = 1:4
+        write4ByteTxRx(port_num, PROTOCOL_VERSION, IDs(k), ADDR_PRO_PROFILE_ACCELERATION, SAFE_PROFILE_ACCEL);
+        write4ByteTxRx(port_num, PROTOCOL_VERSION, IDs(k), ADDR_PRO_PROFILE_VELOCITY, SAFE_PROFILE_VEL);
+    end
+
+    fprintf('Swing complete.\n');
+
 catch ME
-    fprintf('Program interrupted during drop off: %s\n', ME.message);
+    fprintf('Program interrupted during golf swing: %s\n', ME.message);
 end
 
-%% 9. Recovery Position
+%% 8. Recovery Position
 end_x = 0.175; end_y = 0; end_z = 0.15; end_pitch = 0;
 [q1,q2,q3,q4,valid] = inverse_kinematics(end_x,end_y,end_z,end_pitch, ...
     d1,a2,a3,L_tip_total,delta,joint_limits);
@@ -382,11 +346,11 @@ if valid
     current_q = [q1, q2, q3, q4];
     phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, false);
     send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
-    plot_scene_gates(current_q, gates, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
+    plot_scene_golf(current_q, club_start, ball_pos, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
     pause(2);
 end
 
-%% 10. Shutdown
+%% 9. Shutdown
 fprintf('Shutting down...\n');
 for k = 1:length(IDs)
     write1ByteTxRx(port_num, PROTOCOL_VERSION, IDs(k), ADDR_PRO_TORQUE_ENABLE, TORQUE_DISABLE);
@@ -437,37 +401,19 @@ wy = (r_gx - gx)  * unit;
 wz =  gz_scale     * unit;
 end
 
-function plot_scene_gates(q, gates, d1,a2,a3,L4,delta,unit,rx,ry)
+function plot_scene_golf(q, club_start, ball_pos, d1,a2,a3,L4,delta,unit,rx,ry)
 cla; hold on; grid on; axis equal;
-axis([-0.3 0.4 -0.4 0.4 0 0.6]);
+axis([-0.4 0.4 -0.4 0.4 0 0.6]);
 view(45, 30);
-xlabel('X'); ylabel('Y'); zlabel('Z');
+xlabel('World X (m)'); ylabel('World Y (m)'); zlabel('World Z (m)');
 
-% Plot gates
-for k = 1:size(gates, 1)
-    [gx, gy, ~] = grid_to_world(gates{k,1}, gates{k,2}, 0, unit, rx, ry);
+% Plot Club
+[cwx, cwy, ~] = grid_to_world(club_start(1), club_start(2), 0, unit, rx, ry);
+plot3(cwx, cwy, 0.025, 'k^', 'MarkerSize', 8, 'MarkerFaceColor', 'k');
 
-    g_width = 0.10;
-    g_height = 0.08;
-    g_depth = 0.02;
-
-    ori = gates{k,3};
-
-    if strcmpi(ori, 'x')
-        % Passing real world X axis, posts span across real world Y (Robot base X)
-        p1 = [gx - g_width/2, gy, 0];
-        p2 = [gx + g_width/2, gy, 0];
-    elseif strcmpi(ori, 'y')
-        % Passing real world Y axis, posts span across real world X (Robot base Y)
-        p1 = [gx, gy - g_width/2, 0];
-        p2 = [gx, gy + g_width/2, 0];
-    end
-
-    % Draw two vertical posts and one horizontal bar
-    plot3([p1(1) p1(1)], [p1(2) p1(2)], [0 g_height], 'k', 'LineWidth', 4);
-    plot3([p2(1) p2(1)], [p2(2) p2(2)], [0 g_height], 'k', 'LineWidth', 4);
-    plot3([p1(1) p2(1)], [p1(2) p2(2)], [g_height g_height], 'k', 'LineWidth', 4);
-end
+% Plot Ball
+[bwx, bwy, ~] = grid_to_world(ball_pos(1), ball_pos(2), 0, unit, rx, ry);
+plot3(bwx, bwy, 0.015, 'ro', 'MarkerSize', 10, 'MarkerFaceColor', 'r');
 
 P_tip = plot_robot(q, d1,a2,a3,L4,delta, 0.04);
 end

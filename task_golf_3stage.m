@@ -40,9 +40,9 @@ NORMAL_ACCEL       = 30;
 GRIPPER_PROFILE_VEL = 200;
 
 % Swing specific profiles
-SWING_VEL            = 2047;  % Max velocity for standard Dynamixels
-SWING_ACCEL          = 120;   % Increased acceleration for a more explosive swing
-SWING_KEYFRAME_PAUSE = 0.04;  % Reduced pause between keyframes for a continuous fast motion
+SWING_VEL            = 4095;  % Max velocity for standard Dynamixels
+SWING_ACCEL          = 150;   % Increased acceleration for a more explosive swing
+SWING_KEYFRAME_PAUSE = 0.02;  % Reduced pause between keyframes for a continuous fast motion
 
 global MOTOR_11_OFFSET;
 MOTOR_11_OFFSET = deg2rad(2);
@@ -79,7 +79,7 @@ fprintf('Torque, Acceleration & Velocity Profiles ENABLED.\n');
 
 %% 2. GRIPPER SETTINGS
 GRIPPER_OPEN       = deg2rad(-45);
-GRIPPER_CLOSE_BALL = deg2rad(45);
+GRIPPER_CLOSE_BALL = deg2rad(40);
 GRIPPER_CLOSE_CLUB = deg2rad(30);
 
 current_gripper = GRIPPER_OPEN;
@@ -155,47 +155,33 @@ plot_scene_golf(current_q, ball_holders, selected_ball_idx, golf_tee, golf_club_
     attached_ball, attached_club, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
 pause(2);
 
-%% 6. DEFINE SWING TRAJECTORY & PRE-FLIGHT CHECK
-P0 = [0.03, -0.14,  0.26];   pitch0 =  0;       % backswing
-Pm = [0.18,  0.1,  0.07];   pitchM = -pi/4;    % impact
-P1 = [0.03,  0.18,  0.26];   pitch1 =  0;       % follow-through
+%% 6. DEFINE SWING POSTURE
+P0 = [0.07, -0.14,  0.26];   % backswing direction
+Pm = [0.18,  0.1,  0.11];    % impact posture & radius
+P1 = [0.07,  0.11,  0.26];   % follow-through direction
+pitchM = -pi/4;
 
-A = 2*(P0 + P1) - 4*Pm;
-B = (P1 - P0) - A;
-C = P0;
+% We will use Pm to define the fixed striking posture
+[q1_m, q2_m, q3_m, q4_m, ok_m] = inverse_kinematics(Pm(1), Pm(2), Pm(3), pitchM, ...
+    d1,a2,a3,L_tip_total,delta,joint_limits);
 
-ap = 2*(pitch0 + pitch1) - 4*pitchM;
-bp = (pitch1 - pitch0) - ap;
-cp = pitch0;
-
-fprintf('\n--- Pre-flight IK check for swing ---\n');
-t_check = linspace(0, 1, 20);
-any_fail = false;
-for idx = 1:length(t_check)
-    t  = t_check(idx);
-    tx = A(1)*t^2 + B(1)*t + C(1);
-    ty = A(2)*t^2 + B(2)*t + C(2);
-    tz = A(3)*t^2 + B(3)*t + C(3);
-    tp = ap*t^2   + bp*t   + cp;
-    [~,~,~,~,ok] = inverse_kinematics(tx,ty,tz,tp, ...
-        d1,a2,a3,L_tip_total,delta,joint_limits);
-    if ~ok
-        fprintf('  IK FAIL  t=%.2f  xyz=[%.3f  %.3f  %.3f]  pitch=%.1f deg\n', ...
-            t, tx, ty, tz, rad2deg(tp));
-        any_fail = true;
-    end
-end
-if any_fail
-    error('Pre-flight check failed for swing trajectory. Adjust P0/Pm/P1.');
-else
-    fprintf('  All swing samples reachable.\n\n');
+if ~ok_m
+    error('Impact position (Pm) unreachable!');
 end
 
-% Plot ideal arc on the figure
-t_ref = linspace(0,1,100);
-ref_pts = (A' * t_ref.^2) + (B' * t_ref) + C';
-plot3(ref_pts(1,:), ref_pts(2,:), ref_pts(3,:), '--', ...
-    'Color',[0.6 0.6 0.6], 'LineWidth',1.5, 'DisplayName','Ideal arc');
+% Start and end base angles based on P0 and P1 directions
+q1_start = atan2(P0(2), P0(1));
+q1_end   = atan2(P1(2), P1(1));
+
+fprintf('\n--- Swing Posture Calculated ---\n');
+fprintf('Base will rotate from %.1f deg to %.1f deg.\n', rad2deg(q1_start), rad2deg(q1_end));
+
+% Plot ideal arc on the figure for visualization
+t_ref = linspace(q1_start, q1_end, 100);
+ref_x = sqrt(Pm(1)^2 + Pm(2)^2) * cos(t_ref);
+ref_y = sqrt(Pm(1)^2 + Pm(2)^2) * sin(t_ref);
+ref_z = ones(size(t_ref)) * Pm(3);
+plot3(ref_x, ref_y, ref_z, '--', 'Color',[0.6 0.6 0.6], 'LineWidth',1.5, 'DisplayName','Arc');
 
 
 %% 7. MAIN TASK - PICKUP
@@ -314,22 +300,14 @@ for s = 1:NUM_APPROACH
 end
 pause(0.5);
 
-% Now move to P0 (swing start)
-current_pitch_val = home_pitch;
-current_pos_val = HOME_HIGH;
+% Now move to the striking posture but at the start yaw angle
+fprintf('Adjusting to striking posture (sweep start)...\n');
+q_start_target = [q1_start, q2_m, q3_m, q4_m];
+current_q_initial = current_q;
 
-fprintf('Adjusting to swing position (P0)...\n');
 for s = 1:NUM_APPROACH
     frac = s / NUM_APPROACH;
-    tx = current_pos_val(1)*(1-frac) + P0(1)*frac;
-    ty = current_pos_val(2)*(1-frac) + P0(2)*frac;
-    tz = current_pos_val(3)*(1-frac) + P0(3)*frac;
-    tp = current_pitch_val*(1-frac) + pitch0*frac;
-
-    [q1,q2,q3,q4,ok] = inverse_kinematics(tx,ty,tz,tp,...
-        d1,a2,a3,L_tip_total,delta,joint_limits);
-    if ~ok, continue; end
-    current_q = [q1,q2,q3,q4];
+    current_q = current_q_initial * (1 - frac) + q_start_target * frac;
 
     phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, attached_club);
     send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
@@ -344,52 +322,23 @@ fprintf('At swing start. Boosting velocity to %d...\n', SWING_VEL);
 set_profiles(port_num, PROTOCOL_VERSION, IDs, SWING_ACCEL, SWING_VEL);
 pause(0.2);
 
-SWING_KEYFRAMES = 5;
-t_swing = linspace(0, 1, SWING_KEYFRAMES);
+fprintf('Executing single-segment fast base rotation...\n');
 
-fprintf('Executing swing (%d keyframes at vel=%d, pause=%.3fs between)...\n', ...
-    SWING_KEYFRAMES, SWING_VEL, SWING_KEYFRAME_PAUSE);
+% Only the base motor changes
+current_q = [q1_end, q2_m, q3_m, q4_m];
+phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, attached_club);
+send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
 
-for idx = 1:SWING_KEYFRAMES
-    t  = t_swing(idx);
+% Wait for the physical movement to finish
+pause(0.6);
 
-    tx = A(1)*t^2 + B(1)*t + C(1);
-    ty = A(2)*t^2 + B(2)*t + C(2);
-    tz = A(3)*t^2 + B(3)*t + C(3);
-    tp = ap*t^2   + bp*t   + cp;
+attached_ball = false; 
+selected_ball_idx = -1; % Disappear from tee
+plot_scene_golf(current_q, ball_holders, selected_ball_idx, golf_tee, golf_club_base, ...
+    attached_ball, attached_club, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
+drawnow;
 
-    [q1,q2,q3,q4,ok] = inverse_kinematics(tx,ty,tz,tp,...
-        d1,a2,a3,L_tip_total,delta,joint_limits);
-    if ~ok
-        fprintf('  IK invalid at t=%.2f – skipping\n', t);
-        continue;
-    end
-    current_q = [q1,q2,q3,q4];
-
-    % Impact ball logic (visual only)
-    if t >= 0.5 && attached_ball == false
-        % Simulate ball leaving the tee upon impact
-        attached_ball = false;
-        % However, we just won't render the ball on tee anymore to simulate hit
-        % To do this properly we'd need a "ball_hit" state.
-    end
-
-    phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, attached_club);
-    send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
-
-    pause(SWING_KEYFRAME_PAUSE);
-
-    % To prevent ball from staying on tee after hit, set attached_ball to true but not render it or just clear selected_ball_idx.
-    if t >= 0.5
-        selected_ball_idx = -1; % Disappear from tee
-    end
-
-    plot_scene_golf(current_q, ball_holders, selected_ball_idx, golf_tee, golf_club_base, ...
-        attached_ball, attached_club, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
-    drawnow limitrate;
-end
-
-pause(1.0);
+pause(0.5);
 fprintf('Swing complete.\n');
 
 %% 10. RETURN TO NEUTRAL

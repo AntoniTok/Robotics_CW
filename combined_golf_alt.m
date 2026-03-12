@@ -107,14 +107,14 @@ ball_holders = [
 ];
 
 selected_ball_idx = 1;
-golf_tee = [9, 12.5];
-golf_club_base = [2, 3];
+golf_tee = [9, 10.5];
+golf_club_base = [3, 3];
 
 % Object heights
-ball_pick_z   = 0.025;   
+ball_pick_z   = 0.028;   
 tee_place_z   = 0.030;   
-club_height   = 0.10;    
-club_pick_z   = 0.11;    
+club_height   = 0.14;    
+club_pick_z   = 0.15;    
 
 %% 4. ROBOT PARAMETERS
 d1 = 0.077;
@@ -163,9 +163,9 @@ plot_scene_golf(current_q, ball_holders, selected_ball_idx, golf_tee, golf_club_
 pause(2);
 
 %% 6. DEFINE SWING TRAJECTORY & PRE-FLIGHT CHECK
-P0 = [0.08, -0.14,  0.26];   pitch0 =  0;       % backswing
-Pm = [0.19,  0.05,  0.1];   pitchM = -pi/4;    % impact
-P1 = [0.08,  0.18,  0.26];   pitch1 =  0;       % follow-through
+P0 = [0.08,  0.18,  0.26];   pitch0 =  0;       % backswing
+Pm = [0.19,  0.05,  0.15];   pitchM = -pi/4;    % impact
+P1 = [0.08, -0.14,  0.26];   pitch1 =  0;       % follow-through
 
 A = 2*(P0 + P1) - 4*Pm;
 B = (P1 - P0) - A;

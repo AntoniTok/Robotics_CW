@@ -128,7 +128,7 @@ axis([-0.4 0.4 -0.4 0.4 0 0.5]);
 %% =========================================================
 fprintf('\n--- PHASE 1: Moving to Neutral Home ---\n');
 
-home_x = 0.20; home_y = 0.0; home_z = 0.20; home_pitch = 0;
+home_x = -0.20; home_y = 0.0; home_z = 0.20; home_pitch = 0;
 [q1h, q2h, q3h, q4h, valid] = inverse_kinematics( ...
     home_x, home_y, home_z, home_pitch, ...
     d1, a2, a3, L_tip_total, delta, joint_limits);
@@ -190,12 +190,12 @@ pause(0.5);
 %% =========================================================
 fprintf('\n--- PHASE 4: Moving to Swing Position ---\n');
 
-% Target in world frame
+% Target in world frame (Rotated 180 deg)
 swing_x = 0.000;
-swing_y = 0.075;
+swing_y = -0.075;
 swing_z = 0.120;
 
-% NOTE: theta1 here = atan2(0.075, 0) = 90 deg, so arm points in +Y
+% NOTE: theta1 here = atan2(-0.075, 0) = -90 deg, so arm points in -Y
 [q1_sw, q2_sw, q3_sw, q4_sw, valid_sw] = inverse_kinematics( ...
     swing_x, swing_y, swing_z, target_pitch, ...
     d1, a2, a3, L_tip_total, delta, joint_limits);
@@ -294,7 +294,7 @@ write4ByteTxRx(port_num, PROTOCOL_VERSION, ID_BASE, ADDR_PRO_PROFILE_ACCELERATIO
 write4ByteTxRx(port_num, PROTOCOL_VERSION, ID_BASE, ADDR_PRO_PROFILE_VELOCITY,     NORMAL_VEL);
 fprintf('  Base motor restored to normal profile (vel=%d, accel=%d).\n', NORMAL_VEL, NORMAL_ACCEL);
 
-end_x = 0.15; end_y = 0.0; end_z = 0.15; end_pitch = 0;
+end_x = -0.15; end_y = 0.0; end_z = 0.15; end_pitch = 0;
 [q1e, q2e, q3e, q4e, valid_end] = inverse_kinematics( ...
     end_x, end_y, end_z, end_pitch, ...
     d1, a2, a3, L_tip_total, delta, joint_limits);

@@ -141,8 +141,8 @@ golf_club_base = [3, 3];
 % Object heights
 ball_pick_z   = 0.028;
 tee_place_z   = 0.030;
-club_height   = 0.14;
-club_pick_z   = 0.15;
+club_height   = 0.13;
+club_pick_z   = 0.14;
 
 %% =========================================================
 %% 4. VISUALIZATION SETUP

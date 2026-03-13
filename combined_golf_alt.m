@@ -36,7 +36,7 @@ DEVICENAME = 'COM7';                 % Matching task_golf.m
 TORQUE_ENABLE      = 1;
 TORQUE_DISABLE     = 0;
 NORMAL_VEL         = 150;
-NORMAL_ACCEL       = 30;
+NORMAL_ACCEL       = 50;
 GRIPPER_PROFILE_VEL = 200;
 
 % Swing specific profiles
@@ -47,8 +47,8 @@ GRIPPER_PROFILE_VEL = 200;
 % FIX 3: Restored SWING_KEYFRAME_PAUSE from 0.04s back to 0.06s. Reducing
 %         it caused motors to skip waypoints, producing a shorter choppier
 %         motion rather than a faster one.
-SWING_VEL            = 900;
-SWING_ACCEL          = 80;
+SWING_VEL            = 200;
+SWING_ACCEL          = 100;
 SWING_KEYFRAME_PAUSE = 0.06;
 
 global MOTOR_11_OFFSET;
@@ -107,14 +107,14 @@ ball_holders = [
 ];
 
 selected_ball_idx = 1;
-golf_tee = [9, 10.5];
+golf_tee = [9, 12.5];
 golf_club_base = [3, 3];
 
 % Object heights
 ball_pick_z   = 0.028;   
 tee_place_z   = 0.030;   
-club_height   = 0.14;    
-club_pick_z   = 0.15;    
+club_height   = 0.13;    
+club_pick_z   = 0.14;    
 
 %% 4. ROBOT PARAMETERS
 d1 = 0.077;
@@ -164,7 +164,7 @@ pause(2);
 
 %% 6. DEFINE SWING TRAJECTORY & PRE-FLIGHT CHECK
 P0 = [0.08,  0.18,  0.26];   pitch0 =  0;       % backswing
-Pm = [0.19,  0.05,  0.15];   pitchM = -pi/4;    % impact
+Pm = [0.15,  0.02,  0.12];   pitchM = -pi/4;    % impact
 P1 = [0.08, -0.14,  0.26];   pitch1 =  0;       % follow-through
 
 A = 2*(P0 + P1) - 4*Pm;
@@ -406,7 +406,7 @@ fprintf('Returning to neutral (normal speed)...\n');
 set_profiles(port_num, PROTOCOL_VERSION, IDs, NORMAL_ACCEL, NORMAL_VEL);
 pause(0.2);
 
-REST      = [0.15, 0.00, 0.08];
+REST      = [0.15, 0.00, 0.15];
 rest_pitch = -pi/4;
 
 follow_pos   = forward_kinematics(current_q, d1,a2,a3,L_tip_total,delta);
@@ -462,7 +462,77 @@ for s = 1:NUM_LOWER
 end
 pause(1.5);
 
-%% 11. CLEANUP
+%% 11. RETURN CLUB TO HOLDER
+fprintf('\n--- 11. Returning Club to Holder ---\n');
+
+[cx, cy, ~] = grid_to_world(golf_club_base(1), golf_club_base(2), ...
+    0, GRID_UNIT, ROBOT_GX, ROBOT_GY);
+
+if ~exist('best_pitch_club', 'var')
+    best_pitch_club = deg2rad(-60);
+end
+
+hover_z = 0.05;
+
+waypoints_return_club = [
+    cx, cy, club_pick_z + hover_z, best_pitch_club, 0, 1;   % approach club holder
+    cx, cy, club_pick_z,           best_pitch_club, 3, 1;   % place and open gripper
+    cx, cy, club_pick_z + hover_z, best_pitch_club, 0, 1;   % lift away from club
+    home_x, home_y, home_z,        0,               0, 1;   % return to home safely
+];
+
+try
+    [current_q, current_gripper, attached_ball, attached_club] = ...
+        execute_waypoints(waypoints_return_club, current_q, current_gripper, ...
+        attached_ball, attached_club, selected_ball_idx, ...
+        port_num, PROTOCOL_VERSION, IDs, ...
+        d1,a2,a3,L_tip_total,delta,joint_limits,offset_classmate, ...
+        ball_holders, golf_tee, golf_club_base, GRID_UNIT, ROBOT_GX, ROBOT_GY, ...
+        GRIPPER_OPEN, GRIPPER_CLOSE_BALL, GRIPPER_CLOSE_CLUB);
+    fprintf('  Club returned successfully.\n');
+catch ME
+    fprintf('  Failed to return club: %s\n', ME.message);
+end
+
+%% 12. FINAL REST POSITION
+fprintf('\n--- 12. Moving to Final Rest Position ---\n');
+final_x = 0.1; final_y = 0.0; final_z = 0.10; final_pitch = -pi/4;
+
+[q1f, q2f, q3f, q4f, valid_final] = inverse_kinematics( ...
+    final_x, final_y, final_z, final_pitch, ...
+    d1, a2, a3, L_tip_total, delta, joint_limits);
+
+if valid_final
+    % Move smoothly to the final rest position
+    cur_pos   = forward_kinematics(current_q, d1, a2, a3, L_tip_total, delta);
+    cur_pitch = current_q(2) + delta + current_q(3) + current_q(4);
+    num_steps = 40;
+
+    traj_x     = linspace(cur_pos(1), final_x,     num_steps);
+    traj_y     = linspace(cur_pos(2), final_y,     num_steps);
+    traj_z     = linspace(cur_pos(3), final_z,     num_steps);
+    traj_pitch = linspace(cur_pitch,  final_pitch, num_steps);
+
+    for t = 1:num_steps
+        [q1t, q2t, q3t, q4t, vt] = inverse_kinematics( ...
+            traj_x(t), traj_y(t), traj_z(t), traj_pitch(t), ...
+            d1, a2, a3, L_tip_total, delta, joint_limits);
+        if vt
+            current_q = [q1t, q2t, q3t, q4t];
+            phys_angles = sim_to_phys_angles(current_q, current_gripper, delta, offset_classmate, attached_club);
+            send_to_robot(port_num, PROTOCOL_VERSION, IDs, phys_angles);
+            plot_scene_golf(current_q, ball_holders, selected_ball_idx, golf_tee, golf_club_base, ...
+                attached_ball, attached_club, d1,a2,a3,L_tip_total,delta,GRID_UNIT,ROBOT_GX,ROBOT_GY);
+            drawnow; pause(0.01);
+        end
+    end
+    fprintf('  Arm resting safely at final position.\n');
+    pause(1.0);
+else
+    fprintf('  WARNING: Final rest position unreachable, staying here.\n');
+end
+
+%% 13. CLEANUP
 fprintf('\n--- Shutting Down ---\n');
 for k = 1:length(IDs)
     write1ByteTxRx(port_num, PROTOCOL_VERSION, IDs(k), ADDR_PRO_TORQUE_ENABLE, TORQUE_DISABLE);

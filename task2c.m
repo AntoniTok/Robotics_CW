@@ -78,13 +78,13 @@ ROBOT_GY  = 3;
 
 % Gate definitions: {gx, gy, orientation, height}
 gates = {
-    5, 7, 'y', 0.08;
-    7, 10, 'x', 0.11;
-    10, 12, 'x', 0.11;
-    14, 7, 'x', 0.08;
+    4.5,  6.45,  'x', 0.095;
+    7.25, 11.45, 'x', 0.08;
+    11.45, 8,  'y', 0.95;
+    15.55, 4,  'y', 0.08;
     };
 
-stick_start = [17, 1];
+stick_start = [17.5, 0.5];
 target_cubes = [];
 cubes_start = [];
 holders = [];
